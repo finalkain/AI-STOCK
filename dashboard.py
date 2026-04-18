@@ -469,30 +469,55 @@ RS #{results.index(r)+1} ({r['rs']:+.1f}) | {r['alignment']}<br>
 
     # ── 하단: M1 심리 + M2 매크로 ────────────────
     from macro_data import get_market_sentiment, get_fred_data, get_next_fomc
+    from news_feed import get_news_summary
 
     bottom_left, bottom_right = st.columns(2)
 
     with bottom_left:
         st.markdown("##### M1 시장 심리")
+
+        # 정량 지표
         sentiment = get_market_sentiment()
         if sentiment:
-            for key, s in sentiment.items():
-                level = s.get("level", "")
-                level_str = f" | {level}" if level else ""
-                st.markdown(f"""
-<div class="signal-hold">
-<b>{s['name']}</b>: {s['value']}{level_str}
-</div>
-""", unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="signal-none">심리 데이터 로딩 실패</div>',
-                        unsafe_allow_html=True)
+            sent_cols = st.columns(len(sentiment))
+            for i, (key, s) in enumerate(sentiment.items()):
+                with sent_cols[i]:
+                    level = s.get("level", "")
+                    st.markdown(f"<small>{s['name']}</small><br><b>{s['value']}</b>",
+                                unsafe_allow_html=True)
 
-        st.markdown("""
-<div class="signal-none">
-<i>뉴스 감성 · 커뮤니티 언급 빈도: 추후 연동</i>
+        st.markdown("---")
+
+        # 뉴스 피드
+        news = get_news_summary(max_items=15)
+
+        if news["important"]:
+            st.markdown(f"**주요 뉴스** ({len(news['important'])}건)")
+            for n in news["important"][:5]:
+                st.markdown(f"""
+<div class="signal-buy">
+<b>[{n.source}]</b> {n.title}<br>
+<small>{n.published}</small>
 </div>
 """, unsafe_allow_html=True)
+
+        tab_us, tab_kr = st.tabs(["미국 뉴스", "한국 뉴스"])
+
+        with tab_us:
+            if news["us"]:
+                for n in news["us"][:10]:
+                    mark = "**" if n.is_important else ""
+                    st.markdown(f"- {mark}[{n.source}]{mark} {n.title}")
+            else:
+                st.caption("미국 경제 뉴스 없음")
+
+        with tab_kr:
+            if news["kr"]:
+                for n in news["kr"][:10]:
+                    mark = "**" if n.is_important else ""
+                    st.markdown(f"- {mark}[{n.source}]{mark} {n.title}")
+            else:
+                st.caption("한국 경제 뉴스 없음")
 
     with bottom_right:
         st.markdown("##### M2 매크로 — 연준")
