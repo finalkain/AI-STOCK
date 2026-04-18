@@ -467,30 +467,69 @@ RS #{results.index(r)+1} ({r['rs']:+.1f}) | {r['alignment']}<br>
 
     st.divider()
 
-    # ── 하단: M1 심리 + M2 매크로 (추후) ──────────
+    # ── 하단: M1 심리 + M2 매크로 ────────────────
+    from macro_data import get_market_sentiment, get_fred_data, get_next_fomc
+
     bottom_left, bottom_right = st.columns(2)
 
     with bottom_left:
-        st.markdown("##### M1 시장 심리 (추후 구현)")
+        st.markdown("##### M1 시장 심리")
+        sentiment = get_market_sentiment()
+        if sentiment:
+            for key, s in sentiment.items():
+                level = s.get("level", "")
+                level_str = f" | {level}" if level else ""
+                st.markdown(f"""
+<div class="signal-hold">
+<b>{s['name']}</b>: {s['value']}{level_str}
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="signal-none">심리 데이터 로딩 실패</div>',
+                        unsafe_allow_html=True)
+
         st.markdown("""
 <div class="signal-none">
-- 경제 뉴스 감성 분석<br>
-- 비경제 커뮤니티 주식 언급 빈도<br>
-- 뉴스 vs 시장반응 괴리 감지<br>
-<br>
-<i>크롤러 연동 후 활성화 예정</i>
+<i>뉴스 감성 · 커뮤니티 언급 빈도: 추후 연동</i>
 </div>
 """, unsafe_allow_html=True)
 
     with bottom_right:
-        st.markdown("##### M2 매크로 (추후 구현)")
-        st.markdown("""
+        st.markdown("##### M2 매크로 — 연준")
+
+        fomc = get_next_fomc()
+        st.markdown(f"""
+<div class="signal-buy">
+<b>다음 FOMC</b>: {fomc['date']}<br>
+D-{fomc['days_left']}일 {fomc['sep']}
+</div>
+""", unsafe_allow_html=True)
+
+        fred_key = st.secrets.get("fred_api_key", "")
+        fred_data = get_fred_data(fred_key) if fred_key else None
+
+        if fred_data:
+            categories = {}
+            for sid, d in fred_data.items():
+                cat = d["category"]
+                if cat not in categories:
+                    categories[cat] = []
+                categories[cat].append(d)
+
+            for cat, items in categories.items():
+                st.markdown(f"**{cat}**")
+                for d in items:
+                    st.markdown(f"""
+<div class="signal-hold">
+{d['name']}: <b>{d['value']}</b> ({d['change']}) <small>{d['date']}</small>
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.markdown("""
 <div class="signal-none">
-- 미국/한국 통화량 (M2)<br>
-- 인플레율, 금리, 재정적자<br>
-- 무역수지, 정부정책<br>
-<br>
-<i>FRED/한은 API 연동 후 활성화 예정</i>
+FRED API 키 미설정<br>
+Settings → Secrets에 추가:<br>
+<code>fred_api_key = "your_key"</code>
 </div>
 """, unsafe_allow_html=True)
 
