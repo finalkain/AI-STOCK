@@ -1,0 +1,17 @@
+{
+  "total_capital": 3085500,
+  "cash": 1642000,
+  "risk_pct": 0.01,
+  "positions": [
+    {
+      "asset": "TIGER구리실물",
+      "shares": 0,
+      "avg_price": 0,
+      "current_value": 1443500,
+      "trailing_stop": 15506,
+      "entry_date": "2026-04-01",
+      "note": "펀더멘털 기반 매수 (추세추종 이전)"
+    }
+  ],
+  "journal": []
+}
