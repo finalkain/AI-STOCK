@@ -118,22 +118,17 @@ def load_all_data():
 
 
 def load_portfolio():
-    if "portfolio" in st.session_state:
-        return st.session_state.portfolio
+    # 항상 파일에서 최신 상태를 읽음 (캐시 안 함)
     if PORTFOLIO_FILE.exists():
         try:
             with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-                pf = json.load(f)
-                st.session_state.portfolio = pf
-                return pf
+                return json.load(f)
         except:
             pass
-    st.session_state.portfolio = DEFAULT_PORTFOLIO.copy()
-    return st.session_state.portfolio
+    return json.loads(json.dumps(DEFAULT_PORTFOLIO))
 
 
 def save_portfolio(pf):
-    st.session_state.portfolio = pf
     try:
         os.makedirs(PORTFOLIO_FILE.parent, exist_ok=True)
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
