@@ -496,7 +496,7 @@ RS #{results.index(r)+1} ({r['rs']:+.1f}) | {r['alignment']}<br>
             for n in news["important"][:5]:
                 st.markdown(f"""
 <div class="signal-buy">
-<b>[{n.source}]</b> {n.title}<br>
+<b>[{n.source}]</b> <a href="{n.link}" target="_blank" style="color:{COLORS['text']};text-decoration:none;">{n.title}</a><br>
 <small>{n.published}</small>
 </div>
 """, unsafe_allow_html=True)
@@ -506,16 +506,16 @@ RS #{results.index(r)+1} ({r['rs']:+.1f}) | {r['alignment']}<br>
         with tab_us:
             if news["us"]:
                 for n in news["us"][:10]:
-                    mark = "**" if n.is_important else ""
-                    st.markdown(f"- {mark}[{n.source}]{mark} {n.title}")
+                    imp = "**" if n.is_important else ""
+                    st.markdown(f"- {imp}[{n.source}]{imp} [{n.title}]({n.link})")
             else:
                 st.caption("미국 경제 뉴스 없음")
 
         with tab_kr:
             if news["kr"]:
                 for n in news["kr"][:10]:
-                    mark = "**" if n.is_important else ""
-                    st.markdown(f"- {mark}[{n.source}]{mark} {n.title}")
+                    imp = "**" if n.is_important else ""
+                    st.markdown(f"- {imp}[{n.source}]{imp} [{n.title}]({n.link})")
             else:
                 st.caption("한국 경제 뉴스 없음")
 
