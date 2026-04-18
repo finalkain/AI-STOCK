@@ -302,9 +302,7 @@ def main():
         return
 
     pf = load_portfolio()
-    total = pf["total_capital"]
     cash = pf["cash"]
-    risk_amt = int(total * pf["risk_pct"])
 
     with st.spinner("데이터 로딩 중..."):
         all_data = load_all_data()
@@ -315,15 +313,35 @@ def main():
         results.append(r)
     results.sort(key=lambda x: x["rs"], reverse=True)
 
+    # 총자산 실시간 계산 (현금 + 보유종목 시가평가)
+    pos_value = 0
+    for pos in pf["positions"]:
+        asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
+        if asset_r and pos["shares"] > 0:
+            pos["current_value"] = int(asset_r["price"] * pos["shares"])
+            pos_value += pos["current_value"]
+        elif pos.get("current_value", 0) > 0:
+            pos_value += pos["current_value"]
+    total = cash + pos_value
+    pf["total_capital"] = total
+    risk_amt = int(total * pf["risk_pct"])
+
     # ── 상단: 포트폴리오 요약 ────────────────────
     st.markdown(f"### 투자 비서 | {datetime.now().strftime('%Y-%m-%d')}")
 
-    col1, col2, col3, col4 = st.columns(4)
+    total_pnl = 0
+    for pos in pf["positions"]:
+        if pos["shares"] > 0 and pos["avg_price"] > 0:
+            asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
+            if asset_r:
+                total_pnl += (asset_r["price"] - pos["avg_price"]) * pos["shares"]
+
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("총 자산", f"{total:,}원")
-    col2.metric("현금", f"{cash:,}원")
-    col3.metric("1% 리스크", f"{risk_amt:,}원")
-    pos_count = len(pf["positions"])
-    col4.metric("보유 종목", f"{pos_count}개")
+    col2.metric("평가손익", f"{total_pnl:+,.0f}원")
+    col3.metric("현금", f"{cash:,}원")
+    col4.metric("1% 리스크", f"{risk_amt:,}원")
+    col5.metric("보유 종목", f"{len(pf['positions'])}개")
 
     st.divider()
 
@@ -382,11 +400,20 @@ def main():
             elif asset_r["regime"]:
                 status = "추세 유효"
 
+            # 손익 계산
+            pnl_str = ""
+            if pos["shares"] > 0 and pos["avg_price"] > 0:
+                pnl_pct = (price - pos["avg_price"]) / pos["avg_price"] * 100
+                pnl_amt = (price - pos["avg_price"]) * pos["shares"]
+                eval_amt = price * pos["shares"]
+                pnl_str = (f"매입가: {pos['avg_price']:,}원 × {pos['shares']}주<br>"
+                           f"평가금: {eval_amt:,.0f}원 ({pnl_pct:+.1f}%, {pnl_amt:+,.0f}원)<br>")
+
             st.markdown(f"""
 <div class="signal-hold">
 <b>{pos['asset']}</b><br>
 현재가: {price:,.0f}원<br>
-Stop: {ts:,}원 ({ts_gap:.1f}%)<br>
+{pnl_str}Stop: {ts:,}원 ({ts_gap:.1f}%)<br>
 상태: {status}<br>
 {asset_r['alignment']} | 체제 {'OK' if asset_r['regime'] else 'X'}
 </div>
