@@ -1,10 +1,11 @@
 """
-M1 뉴스 수집 — 주요 미국·한국 경제 매체
-RSS 기반, 모든 결과 한국어 표시
+M1 뉴스 수집 — 시장 전체 분위기를 알 수 있는 기사만 추림
+API 없이 패턴 기반 필터링
 """
+import re
 import requests
 import feedparser
-from datetime import datetime, timezone
+import email.utils
 from dataclasses import dataclass
 
 HEADERS = {
@@ -12,47 +13,25 @@ HEADERS = {
                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0"
 }
 
-# ── 경제 키워드 필터 (영문 + 한글) ─────────────────
-ECON_KEYWORDS_EN = [
-    "fed", "fomc", "interest rate", "inflation", "cpi", "gdp", "recession",
-    "tariff", "trade", "unemployment", "treasury", "bond", "yield",
-    "stock", "market", "s&p", "nasdaq", "dow", "rally", "crash", "sell-off",
-    "oil", "gold", "copper", "commodities", "bitcoin", "crypto",
-    "earnings", "revenue", "profit", "deficit", "debt",
-    "china", "korea", "japan", "europe", "dollar", "currency",
-    "semiconductor", "ai ", "tech", "bank", "housing",
-    "powell", "yellen", "central bank", "quantitative",
-]
-
-ECON_KEYWORDS_KR = [
-    "금리", "기준금리", "연준", "인플레", "물가", "경기", "침체",
-    "관세", "무역", "실업", "국채", "수익률", "환율", "달러",
-    "주식", "증시", "코스피", "코스닥", "상승", "하락", "폭락", "급등",
-    "반도체", "AI", "삼성", "SK", "배터리", "2차전지",
-    "유가", "금값", "구리", "원자재", "비트코인", "가상자산",
-    "한국은행", "기획재정부", "수출", "수입", "경상수지",
-    "실적", "매출", "영업이익", "적자", "흑자",
-]
-
 
 @dataclass
 class NewsItem:
     title: str
     source: str
-    source_country: str   # "US" or "KR"
+    source_country: str
     link: str
     published: str
     is_important: bool
+    relevance: int       # 점수 높을수록 시장 전체와 관련
 
 
-# ── RSS 피드 목록 ────────────────────────────────
+# ── RSS 피드 (시장 전체를 다루는 섹션만) ──────────
 FEEDS = {
-    # 미국 (20년+ 신뢰 매체)
     "Bloomberg": {
         "url": "https://feeds.bloomberg.com/markets/news.rss",
         "country": "US", "tier": 1,
     },
-    "WSJ": {
+    "WSJ Markets": {
         "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
         "country": "US", "tier": 1,
     },
@@ -60,7 +39,7 @@ FEEDS = {
         "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
         "country": "US", "tier": 1,
     },
-    "NYT": {
+    "NYT Business": {
         "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
         "country": "US", "tier": 1,
     },
@@ -68,11 +47,6 @@ FEEDS = {
         "url": "https://feeds.marketwatch.com/marketwatch/topstories/",
         "country": "US", "tier": 2,
     },
-    "Investing.com": {
-        "url": "https://www.investing.com/rss/news.rss",
-        "country": "US", "tier": 2,
-    },
-    # 한국
     "한국경제": {
         "url": "https://www.hankyung.com/feed/economy",
         "country": "KR", "tier": 1,
@@ -88,32 +62,164 @@ FEEDS = {
 }
 
 
-def is_economic_news(title: str) -> bool:
-    title_lower = title.lower()
-    for kw in ECON_KEYWORDS_EN:
-        if kw in title_lower:
-            return True
-    for kw in ECON_KEYWORDS_KR:
-        if kw in title:
-            return True
-    return False
+# ═══════════════════════════════════════════════════
+#  시장 전체 분위기 판별 로직 (API 불필요)
+# ═══════════════════════════════════════════════════
+
+# 1. 시장 전체를 설명하는 주어 패턴
+#    "Stocks fall...", "코스피 하락...", "Wall Street..."
+MARKET_SUBJECTS_EN = [
+    r"\bstocks?\b", r"\bmarkets?\b", r"\bwall street\b",
+    r"\bs&p\s?500\b", r"\bnasdaq\b", r"\bdow\b", r"\brussell\b",
+    r"\binvestors?\b", r"\btraders?\b", r"\bsell-?off\b",
+    r"\brally\b", r"\bbull\b", r"\bbear\b",
+    r"\bglobal\s+(economy|markets?|stocks?)\b",
+    r"\bworld\s+(economy|markets?)\b",
+    r"\bfutures?\b", r"\btreasur(y|ies)\b",
+    r"\byield(s)?\b", r"\bbond(s)?\b",
+    r"\boil\s+(price|surge|drop|crash|fall|rise)\b",
+    r"\bgold\s+(price|surge|hit|rise|fall)\b",
+    r"\bdollar\b", r"\bcurrenc(y|ies)\b",
+]
+
+MARKET_SUBJECTS_KR = [
+    r"코스피", r"코스닥", r"증시", r"주가",
+    r"미국\s?증시", r"뉴욕\s?증시", r"아시아\s?증시", r"유럽\s?증시",
+    r"글로벌\s?(시장|경제|증시)", r"세계\s?경제",
+    r"환율", r"달러", r"원화", r"엔화",
+    r"국채", r"금리", r"채권",
+    r"유가", r"금값", r"원자재",
+    r"외국인|기관|개인.*매(수|도)",
+    r"시총", r"시가총액",
+]
+
+# 2. 정책·매크로 키워드 (시장 방향 결정 변수)
+MACRO_KEYWORDS_EN = [
+    r"\bfed(eral reserve)?\b", r"\bfomc\b", r"\brate\s+(cut|hike|decision|hold)\b",
+    r"\binflation\b", r"\bcpi\b", r"\bpce\b", r"\bgdp\b",
+    r"\brecession\b", r"\bunemployment\b", r"\bjobs?\s+report\b",
+    r"\btariff\b", r"\btrade\s+(war|deal|tension|deficit)\b",
+    r"\bsanction\b", r"\bgeopolitic\b",
+    r"\bcentral\s+bank\b", r"\becb\b", r"\bboj\b",
+    r"\bquantitative\b", r"\bbalance\s+sheet\b",
+    r"\bdebt\s+ceiling\b", r"\bshutdown\b", r"\bdeficit\b",
+]
+
+MACRO_KEYWORDS_KR = [
+    r"연준", r"기준금리", r"금리\s?인(상|하|동결)",
+    r"인플레", r"물가", r"소비자물가",
+    r"경기\s?(침체|회복|둔화)", r"GDP",
+    r"관세", r"무역\s?(전쟁|갈등|적자|흑자)",
+    r"한국은행", r"통화\s?정책", r"양적\s?(긴축|완화)",
+    r"재정\s?적자", r"국가\s?부채",
+    r"수출.*(%|증가|감소|급)", r"수입.*(%|증가|감소|급)",
+    r"경상수지",
+]
+
+# 3. 제외 패턴 (개별 기업·인물·생활 뉴스)
+EXCLUDE_PATTERNS_EN = [
+    r"\bearnings\s+call\b", r"\btranscript\b",
+    r"\bQ[1-4]\s+(results?|report|slides?)\b",
+    r"\bIPO\b", r"\bceo\b.*\b(steps?|resign|appoint)\b",
+    r"\bpersonal\s+finance\b", r"\bretirement\b",
+    r"\bmortgage\b", r"\bcredit\s+(card|score)\b",
+    r"\bsavings?\s+account\b",
+    r"\brecipe\b", r"\btravel\b", r"\bfashion\b",
+    r"\bsports?\b", r"\bentertain\b",
+    r"pope\b", r"\breligio\b",
+]
+
+EXCLUDE_PATTERNS_KR = [
+    r"연예|아이돌|드라마|영화|예능",
+    r"맛집|레시피|다이어트|건강",
+    r"로또|복권",
+    r"결혼|이혼|연애|썸",
+    r"인테리어|부동산\s?인테리어",
+    r"대학|입시|수능",
+    r"월급|알바|부업|재테크\s?팁",
+    r"쇼핑|할인|세일|이벤트",
+    r"^\[포토\]", r"^\[영상\]", r"^\[인터뷰\]",
+    r"싱글맘|시어머니|며느리",
+]
+
+
+def calc_relevance(title: str) -> int:
+    """시장 전체 관련성 점수 (0~100). 높을수록 시장 분위기 기사."""
+    t_lower = title.lower()
+    score = 0
+
+    # 제외 패턴 먼저 체크
+    for pat in EXCLUDE_PATTERNS_EN:
+        if re.search(pat, t_lower):
+            return 0
+    for pat in EXCLUDE_PATTERNS_KR:
+        if re.search(pat, title):
+            return 0
+
+    # 시장 주어 매칭 (가장 높은 가중치)
+    for pat in MARKET_SUBJECTS_EN:
+        if re.search(pat, t_lower):
+            score += 30
+            break
+    for pat in MARKET_SUBJECTS_KR:
+        if re.search(pat, title):
+            score += 30
+            break
+
+    # 매크로/정책 키워드
+    macro_hits = 0
+    for pat in MACRO_KEYWORDS_EN:
+        if re.search(pat, t_lower):
+            macro_hits += 1
+    for pat in MACRO_KEYWORDS_KR:
+        if re.search(pat, title):
+            macro_hits += 1
+    score += min(macro_hits * 15, 45)
+
+    # 시장 움직임 동사 (방향성을 알려주는 단어)
+    movement_en = [
+        r"\b(rise|rose|fall|fell|drop|surge|plunge|tumble|soar|jump|sink|slide|climb|rebound)\b",
+        r"\b(hit|reach|record|high|low|volatile|swing|whipsaw)\b",
+    ]
+    movement_kr = [
+        r"(급등|급락|폭등|폭락|상승|하락|반등|반락|조정|랠리|회복|출렁)",
+        r"(사상\s?최고|신고가|최저|바닥|고점|저점|돌파)",
+    ]
+    for pat in movement_en:
+        if re.search(pat, t_lower):
+            score += 15
+            break
+    for pat in movement_kr:
+        if re.search(pat, title):
+            score += 15
+            break
+
+    # Tier 보너스: 숫자(%, 포인트)가 포함된 제목 = 구체적 시장 데이터
+    if re.search(r"\d+(\.\d+)?%", title):
+        score += 10
+
+    return min(score, 100)
 
 
 def is_important(title: str) -> bool:
-    """연준·금리·관세·폭락 등 시장 충격 가능성 높은 뉴스"""
+    """시장 충격 가능성 높은 긴급 뉴스"""
     urgent = [
-        "fed", "fomc", "rate", "금리", "연준",
-        "tariff", "관세", "trade war", "무역전쟁",
-        "crash", "폭락", "급락", "sell-off", "붕괴",
-        "recession", "침체", "위기", "crisis",
-        "breaking", "긴급", "속보",
+        r"\bfed\b.*\brate\b", r"\bfomc\b", r"연준.*금리",
+        r"\btariff\b", r"관세",
+        r"\b(crash|plunge|collapse)\b", r"(폭락|붕괴|패닉)",
+        r"\brecession\b", r"침체",
+        r"\bwar\b", r"전쟁",
+        r"\b(breaking|alert)\b", r"(속보|긴급)",
+        r"\bcrisis\b", r"위기",
     ]
-    title_lower = title.lower()
-    return any(kw in title_lower or kw in title for kw in urgent)
+    t_lower = title.lower()
+    return any(re.search(p, t_lower) or re.search(p, title) for p in urgent)
+
+
+RELEVANCE_THRESHOLD = 25  # 이 점수 이상만 표시
 
 
 def fetch_all_news(max_per_source: int = 10) -> list[NewsItem]:
-    """모든 RSS에서 경제 뉴스 수집"""
     all_news = []
 
     for source_name, info in FEEDS.items():
@@ -129,17 +235,17 @@ def fetch_all_news(max_per_source: int = 10) -> list[NewsItem]:
                     break
 
                 title = entry.get("title", "").strip()
-                if not title:
+                if not title or len(title) < 10:
                     continue
 
-                if not is_economic_news(title):
+                relevance = calc_relevance(title)
+                if relevance < RELEVANCE_THRESHOLD:
                     continue
 
                 link = entry.get("link", "")
                 pub = entry.get("published", "")
                 if pub:
                     try:
-                        import email.utils
                         parsed = email.utils.parsedate_to_datetime(pub)
                         pub = parsed.strftime("%m/%d %H:%M")
                     except:
@@ -152,19 +258,18 @@ def fetch_all_news(max_per_source: int = 10) -> list[NewsItem]:
                     link=link,
                     published=pub,
                     is_important=is_important(title),
+                    relevance=relevance,
                 ))
                 count += 1
 
         except Exception:
             continue
 
-    # 중요 뉴스 먼저, 그 다음 시간순
-    all_news.sort(key=lambda x: (not x.is_important, x.published), reverse=True)
+    all_news.sort(key=lambda x: (not x.is_important, -x.relevance))
     return all_news
 
 
 def get_news_summary(max_items: int = 20):
-    """대시보드용 뉴스 요약"""
     news = fetch_all_news(max_per_source=8)
 
     us_news = [n for n in news if n.source_country == "US"]
