@@ -567,6 +567,62 @@ def main():
 
     st.divider()
 
+    # ── 종목 발굴 스크리너 ─────────────────────────
+    st.markdown("##### 종목 발굴 (한국+미국 개별주)")
+    scan_col1, scan_col2 = st.columns([1, 3])
+    with scan_col1:
+        scan_market = st.multiselect("시장", ["KR", "US"], default=["KR", "US"])
+        scan_min = st.slider("최소 점수", 20, 80, 40, 5, key="scan_min")
+        run_scan_btn = st.button("스캔 실행", type="primary")
+
+    with scan_col2:
+        if run_scan_btn:
+            from stock_scanner import run_scan
+            progress = st.progress(0, text="스캔 준비 중...")
+            def update_progress(pct, msg):
+                progress.progress(pct, text=msg)
+            scan_results = run_scan(
+                markets=tuple(scan_market),
+                min_score=scan_min,
+                progress_callback=update_progress,
+            )
+            progress.empty()
+            st.session_state["scan_results"] = scan_results
+
+        scan_results = st.session_state.get("scan_results", [])
+        if scan_results:
+            scan_data = []
+            for sr in scan_results[:30]:
+                signals = []
+                if sr.breakout_55d: signals.append("55일돌파")
+                elif sr.breakout_20d: signals.append("20일돌파")
+                if sr.stage2: signals.append("Stage2")
+                if sr.volume_ratio >= 1.5: signals.append(f"거래량{sr.volume_ratio:.1f}x")
+
+                scan_data.append({
+                    "점수": sr.total_score,
+                    "종목": sr.name,
+                    "티커": sr.ticker,
+                    "시장": sr.market,
+                    "현재가": f"{sr.price:,.0f}",
+                    "52주高%": f"-{sr.near_high_pct:.1f}%",
+                    "RS": f"{sr.rs_score:+.0f}",
+                    "신호": " | ".join(signals) if signals else "대기",
+                })
+            st.dataframe(
+                pd.DataFrame(scan_data),
+                use_container_width=True,
+                height=300,
+                hide_index=True,
+            )
+            st.caption(f"총 {len(scan_results)}종목 발견 (한국 {len(KR_UNIVERSE)}+미국 {len(US_UNIVERSE)} 스캔)")
+        else:
+            st.caption("'스캔 실행' 버튼을 눌러 종목을 발굴하세요. (한국 45종목 + 미국 70종목)")
+
+    from stock_scanner import KR_UNIVERSE, US_UNIVERSE
+
+    st.divider()
+
     # ── 차트 영역 ─────────────────────────────────
     st.markdown("##### M6 차트")
 
