@@ -116,15 +116,32 @@ class StockScore:
     rs: float
     atr20: float
     score: int
+    extended_pct: float = 0.0  # 돌파선 대비 현재가 괴리 (%)
 
     @property
     def signal(self):
         parts = []
-        if self.breakout_55d: parts.append("55일돌파")
+        if self.breakout_55d: parts.append("55일��파")
         elif self.breakout_20d: parts.append("20일돌파")
         if self.stage2: parts.append("Stage2")
-        if self.volume_ratio >= 1.5: parts.append(f"거래량{self.volume_ratio:.1f}x")
+        if self.volume_ratio >= 1.5: parts.append(f"거��량{self.volume_ratio:.1f}x")
         return " · ".join(parts) if parts else "대기"
+
+    @property
+    def is_buy_timing(self):
+        """
+        매수 적기 판별 — 절대 기준 (모두 충족해야 함)
+        1. Stage 2 정배열
+        2. 20일 또는 55일 저항선 돌파 중
+        3. 거래량 평균 이상 (1.2배+)
+        4. 돌파선에서 5% 이내 (확장 과다 ���님)
+        """
+        return (
+            self.stage2
+            and (self.breakout_20d or self.breakout_55d)
+            and self.volume_ratio >= 1.2
+            and self.extended_pct <= 5.0
+        )
 
 
 @dataclass
@@ -166,8 +183,16 @@ def _score_stock(ticker, name):
         vol_ratio = vol_recent / vol_avg if vol_avg > 0 else 0
 
         stage2 = price > ma50 > ma150 > ma200
-        brk20 = price >= np.max(h[-20:])
-        brk55 = price >= np.max(h[-55:])
+
+        high_20 = np.max(h[-20:])
+        high_55 = np.max(h[-55:])
+        brk20 = price >= high_20
+        brk55 = price >= high_55
+
+        # 돌파선 대비 확장률 (돌파선에서 얼마나 멀리 갔는가)
+        breakout_level = high_55 if brk55 else (high_20 if brk20 else price)
+        extended_pct = ((price - breakout_level) / breakout_level * 100
+                        if breakout_level > 0 else 0)
 
         r3m = (c[-1] / c[-63] - 1) * 2 if len(c) > 63 else 0
         r6m = (c[-63] / c[-126] - 1) if len(c) > 126 else 0
@@ -189,6 +214,7 @@ def _score_stock(ticker, name):
             stage2=stage2, breakout_20d=brk20, breakout_55d=brk55,
             near_high_pct=near_high, volume_ratio=vol_ratio,
             rs=rs, atr20=atr20, score=score,
+            extended_pct=round(extended_pct, 1),
         )
     except:
         return None

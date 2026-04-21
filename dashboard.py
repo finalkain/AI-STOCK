@@ -391,6 +391,40 @@ def main():
         all_sectors = st.session_state.get("all_sectors", [])
 
         if sector_results:
+            # ── 매수 적기 종목 (절대 기준 충족) ───
+            buy_ready = []
+            for sr in sector_results:
+                for s in sr.leaders:
+                    if s.is_buy_timing:
+                        buy_ready.append((sr.name, s))
+
+            if buy_ready:
+                st.markdown(f"""
+<div class="signal-buy">
+<b>매수 적기 — {len(buy_ready)}종목</b> (저항선 돌파 + Stage2 + 거래량 + 미확장)
+</div>""", unsafe_allow_html=True)
+                for sector_name, s in buy_ready:
+                    stop = s.price - 2 * s.atr20
+                    risk_ps = 2 * s.atr20
+                    qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
+                    brk = "55일돌파" if s.breakout_55d else "20일돌파"
+                    st.markdown(f"""
+<div class="signal-hold">
+<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x<br>
+현재가: {s.price:,.0f} | 손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능
+</div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+<div class="signal-none">
+<b>매수 적기 종목 없음</b><br>
+모든 조건(Stage2 + 돌파 + 거래량 + 미확장)을<br>
+동시에 만족하는 종목이 없습니다.<br>
+<i>거래하지 않는 것도 포지션입니다.</i>
+</div>""", unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # ── 섹터별 대장주 ─────────────────
             for sr in sector_results:
                 st.markdown(f"""
 <div class="signal-buy">
