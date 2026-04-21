@@ -321,8 +321,8 @@ def main():
     pf["total_capital"] = total
     risk_amt = int(total * pf["risk_pct"])
 
-    # ── 상단: 포트폴리오 요약 ────────────────────
-    st.markdown(f"### 투자 비서 | {datetime.now().strftime('%Y-%m-%d')}")
+    # ── 상단: 포트폴리오 + 리스크 관리 ──────────────
+    st.markdown(f"### 추세추종 터미널 | {datetime.now().strftime('%Y-%m-%d')}")
 
     total_pnl = 0
     for pos in pf["positions"]:
@@ -331,12 +331,39 @@ def main():
             if asset_r:
                 total_pnl += (asset_r["price"] - pos["avg_price"]) * pos["shares"]
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("총 자산", f"{total:,}원")
-    col2.metric("평가손익", f"{total_pnl:+,.0f}원")
-    col3.metric("현금", f"{cash:,}원")
-    col4.metric("1% 리스크", f"{risk_amt:,}원")
-    col5.metric("보유 종목", f"{len(pf['positions'])}개")
+    # 포트 전체 리스크 (모든 포지션 동시 손절 시)
+    total_stop_loss = 0
+    for pos in pf["positions"]:
+        if pos["shares"] > 0 and pos.get("trailing_stop", 0) > 0:
+            asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
+            if asset_r:
+                loss_per_pos = (asset_r["price"] - pos["trailing_stop"]) * pos["shares"]
+                total_stop_loss += max(loss_per_pos, 0)
+    port_risk_pct = (total_stop_loss / total * 100) if total > 0 else 0
+
+    top_row = st.columns([1, 1, 1, 1, 1, 1.5])
+    top_row[0].metric("총 자산", f"{total:,}원")
+    top_row[1].metric("평가손익", f"{total_pnl:+,.0f}원")
+    top_row[2].metric("현금", f"{cash:,}원")
+    top_row[3].metric("보유", f"{len(pf['positions'])}개")
+    top_row[4].metric("포트 리스크", f"{total_stop_loss:,.0f}원",
+                      delta=f"{port_risk_pct:.1f}%", delta_color="inverse")
+
+    # 리스크 슬라이더 + 필요수익률
+    with top_row[5]:
+        risk_pct_input = st.slider(
+            "거래당 최대 손실 (%)", 0.5, 5.0,
+            float(pf.get("risk_pct", 0.01) * 100), 0.5,
+            key="risk_slider"
+        )
+        pf["risk_pct"] = risk_pct_input / 100
+        risk_amt = int(total * pf["risk_pct"])
+        required_return = (1 / (1 - risk_pct_input / 100) - 1) * 100
+        st.markdown(
+            f"리스크: **{risk_amt:,}원** | "
+            f"필요수익률: **{required_return:.2f}%**",
+            unsafe_allow_html=True,
+        )
 
     st.divider()
 
@@ -414,40 +441,127 @@ def main():
 </div>
 """, unsafe_allow_html=True)
 
-    # ── 오른쪽: 매수 신호 ─────────────────────────
+    # ── 오른쪽: 진입/애드업 계산기 ───────────────
     with right:
-        st.markdown("##### M4 매수 신호")
-        held = {p["asset"] for p in pf["positions"]}
-        candidates = [r for r in results
-                      if ("돌파" in r["signal"] and "체제X" not in r["signal"])
-                      and r["name"] not in held]
+        calc_tab1, calc_tab2 = st.tabs(["진입 계산기", "애드업 계산기"])
 
-        if candidates:
-            for r in candidates[:5]:
-                risk_ps = 2 * r["atr20"]
-                shares = int(risk_amt / risk_ps) if risk_ps > 0 else 0
-                cost = int(shares * r["price"]) if shares > 0 else 0
-                stop = r["price"] - risk_ps
-                affordable = cost <= cash
+        with calc_tab1:
+            st.markdown("##### 신규 진입 계산")
+            calc_asset = st.selectbox("종목", [r["name"] for r in results], key="calc_asset")
+            calc_r = next(r for r in results if r["name"] == calc_asset)
 
-                check = "O" if affordable else "X"
+            price = calc_r["price"]
+            atr = calc_r["atr20"]
+            stop_price = price - 2 * atr
+            risk_per_share = 2 * atr
+
+            if risk_per_share > 0 and price > 0:
+                qty = int(risk_amt / risk_per_share)
+                cost = qty * price
+                stop_pct = risk_per_share / price * 100
+
+                # R배수 목표가
+                r1 = price + 1 * risk_per_share
+                r2 = price + 2 * risk_per_share
+                r3 = price + 3 * risk_per_share
+
+                affordable = "O" if cost <= cash else "X"
+
                 st.markdown(f"""
-<div class="signal-buy">
-<b>{r['signal']}: {r['name']}</b><br>
-RS #{results.index(r)+1} ({r['rs']:+.1f}) | {r['alignment']}<br>
-{shares}주 x {r['price']:,.0f} = {cost:,}원<br>
-손절: {stop:,.0f}원 | 현금: {check}
+<div class="signal-hold">
+현재가: **{price:,.0f}원** | ATR: {atr:,.0f}<br>
+{calc_r['alignment']} | 체제 {'OK' if calc_r['regime'] else 'X'} | {calc_r['signal']}
 </div>
 """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-<div class="signal-none">
-매수 신호 없음<br>
-<br>
-모든 조건을 절대적으로 만족하는<br>
-종목이 없습니다.<br>
-<br>
-<i>거래하지 않는 것도 포지션입니다.</i>
+
+                st.markdown(f"""
+<div class="signal-buy">
+<b>매수 계획</b><br>
+손절가: {stop_price:,.0f}원 (-{stop_pct:.1f}%)<br>
+수량: **{qty}주** × {price:,.0f} = **{cost:,}원**<br>
+최대손실: {risk_amt:,}원 ({risk_pct_input:.1f}%)<br>
+현금: {affordable} ({cash:,}원)
+</div>
+""", unsafe_allow_html=True)
+
+                st.markdown(f"""
+<div class="signal-hold">
+<b>목표가 (R배수)</b><br>
+1R (1:1): {r1:,.0f}원 (+{(r1/price-1)*100:.1f}%)<br>
+2R (2:1): {r2:,.0f}원 (+{(r2/price-1)*100:.1f}%)<br>
+3R (3:1): {r3:,.0f}원 (+{(r3/price-1)*100:.1f}%)
+</div>
+""", unsafe_allow_html=True)
+            else:
+                st.caption("ATR 데이터 부족")
+
+        with calc_tab2:
+            st.markdown("##### 애드업 (추가매수)")
+            held_positions = [p for p in pf["positions"] if p["shares"] > 0]
+            if not held_positions:
+                st.caption("보유 종목 없음")
+            else:
+                addup_asset = st.selectbox(
+                    "종목", [p["asset"] for p in held_positions], key="addup_asset"
+                )
+                addup_pos = next(p for p in held_positions if p["asset"] == addup_asset)
+                addup_r = next((r for r in results if r["name"] == addup_asset), None)
+
+                if addup_r:
+                    cur_price = addup_r["price"]
+                    cur_atr = addup_r["atr20"]
+                    avg = addup_pos["avg_price"]
+                    shares_held = addup_pos["shares"]
+                    cur_stop = addup_pos.get("trailing_stop", 0)
+
+                    # 피봇 = 현재 Stop + 2*ATR (대략 직전 돌파 수준)
+                    pivot = cur_stop + 2 * cur_atr if cur_stop > 0 else cur_price
+                    addup1_price = int(pivot * 1.025)
+                    addup2_price = int(pivot * 1.05)
+
+                    # 추가매수 수량 (동일 리스크)
+                    risk_ps = 2 * cur_atr
+                    addup_qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
+                    new_stop = int(pivot * 0.97)
+
+                    cur_pnl_pct = (cur_price - avg) / avg * 100 if avg > 0 else 0
+
+                    st.markdown(f"""
+<div class="signal-hold">
+<b>{addup_asset}</b><br>
+현재: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%)<br>
+보유: {shares_held}주 × 평균 {avg:,}원<br>
+현재 Stop: {cur_stop:,}원
+</div>
+""", unsafe_allow_html=True)
+
+                    ready1 = "진입 가능" if cur_price >= addup1_price else f"{addup1_price - cur_price:,}원 남음"
+                    ready2 = "진입 가능" if cur_price >= addup2_price else f"{addup2_price - cur_price:,}원 남음"
+
+                    st.markdown(f"""
+<div class="signal-buy">
+<b>1차 애드업</b> (피봇+2.5%)<br>
+가격: {addup1_price:,}원 | {ready1}<br>
+수량: {addup_qty}주 | Stop 상향: {new_stop:,}원
+</div>
+""", unsafe_allow_html=True)
+
+                    new_stop2 = int(addup1_price * 0.97)
+                    st.markdown(f"""
+<div class="signal-buy">
+<b>2차 애드업</b> (피봇+5%)<br>
+가격: {addup2_price:,}원 | {ready2}<br>
+수량: {addup_qty}주 | Stop 상향: {new_stop2:,}원
+</div>
+""", unsafe_allow_html=True)
+
+                    if cur_price >= addup1_price:
+                        total_shares = shares_held + addup_qty
+                        new_avg = (avg * shares_held + cur_price * addup_qty) / total_shares
+                        st.markdown(f"""
+<div class="signal-hold">
+애드업 후: {total_shares}주 × 평균 {new_avg:,.0f}원<br>
+새 Stop: {new_stop:,}원
 </div>
 """, unsafe_allow_html=True)
 
