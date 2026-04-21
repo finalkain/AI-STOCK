@@ -367,32 +367,70 @@ def main():
 
     st.divider()
 
-    # ── 3열 레이아웃: RS + 보유 + 신호 ────────────
-    left, center, right = st.columns([1.2, 1, 1])
+    # ── 2열 레이아웃: 섹터→대장주 | 보유+계산기 ────
+    left, right = st.columns([1.5, 1])
 
-    # ── 왼쪽: RS 랭킹 ────────────────────────────
+    # ── 왼쪽: 강세 섹터 → 대장주 ────────────────
     with left:
-        st.markdown("##### L0 글로벌 RS 랭킹")
-        rs_data = []
-        for i, r in enumerate(results, 1):
-            regime_mark = "O" if r["regime"] else "X"
-            rs_data.append({
-                "#": i,
-                "자산": r["name"],
-                "RS": f'{r["rs"]:+.1f}',
-                "체제": regime_mark,
-                "이평선": r["alignment"],
-                "신호": r["signal"],
-            })
-        st.dataframe(
-            pd.DataFrame(rs_data),
-            use_container_width=True,
-            height=400,
-            hide_index=True,
-        )
+        st.markdown("##### 강세 섹터 → 대장주")
+        run_sector_scan = st.button("섹터 스캔", type="primary")
 
-    # ── 가운데: 보유 종목 관리 ────────────────────
-    with center:
+        if run_sector_scan:
+            from stock_scanner import scan_sectors
+            progress = st.progress(0, text="섹터 RS 계산 중...")
+            def _progress(pct, msg):
+                progress.progress(min(pct, 1.0), text=msg)
+            sector_results, all_sectors = scan_sectors(
+                top_n=4, leaders_per_sector=5, progress_callback=_progress
+            )
+            progress.empty()
+            st.session_state["sector_results"] = sector_results
+            st.session_state["all_sectors"] = all_sectors
+
+        sector_results = st.session_state.get("sector_results", [])
+        all_sectors = st.session_state.get("all_sectors", [])
+
+        if sector_results:
+            for sr in sector_results:
+                st.markdown(f"""
+<div class="signal-buy">
+<b>#{sr.rank} {sr.name}</b> &nbsp; RS {sr.rs:+.0f}
+</div>""", unsafe_allow_html=True)
+
+                if sr.leaders:
+                    leader_data = []
+                    for s in sr.leaders:
+                        leader_data.append({
+                            "점수": s.score,
+                            "종목": s.name,
+                            "현재가": f"{s.price:,.0f}",
+                            "52주高": f"-{s.near_high_pct:.1f}%",
+                            "신호": s.signal,
+                        })
+                    st.dataframe(
+                        pd.DataFrame(leader_data),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(len(leader_data) * 40 + 40, 250),
+                    )
+                else:
+                    st.caption("조건 충족 종목 없음")
+
+            # 전체 섹터 RS (접이식)
+            with st.expander("전체 섹터 RS 랭킹"):
+                for i, (name, rs, _) in enumerate(all_sectors, 1):
+                    bar = "█" * max(int(rs / 10), 0)
+                    st.markdown(f"`{i:>2d}. {name:<12s} RS {rs:>+6.0f}` {bar}")
+        else:
+            st.markdown("""
+<div class="signal-none">
+'섹터 스캔' 버튼을 눌러주세요.<br>
+10개 섹터 RS → 상위 4개 → 대장주 추출<br>
+<small>(한국+미국 약 100종목, 2~3분 소요)</small>
+</div>""", unsafe_allow_html=True)
+
+    # ── 오른쪽: 보유 종목 + 계산기 ────────────────
+    with right:
         st.markdown("##### M5 보유 종목")
         if not pf["positions"]:
             st.info("보유 종목 없음")
@@ -441,8 +479,7 @@ def main():
 </div>
 """, unsafe_allow_html=True)
 
-    # ── 오른쪽: 진입/애드업 계산기 ───────────────
-    with right:
+        # ── 진입/애드업 계산기 ──────────────────
         calc_tab1, calc_tab2 = st.tabs(["진입 계산기", "애드업 계산기"])
 
         with calc_tab1:
@@ -567,110 +604,7 @@ def main():
 
     st.divider()
 
-    # ── 강세 섹터 (상위 3~4개) ───────────────────
-    st.markdown("##### 강세 섹터 (상위)")
-    sector_etfs = {
-        "반도체": {"kr": "091160.KS", "us": "SMH"},
-        "2차전지": {"kr": "305540.KS", "us": "LIT"},
-        "방산": {"kr": "364690.KS", "us": "ITA"},
-        "조선": {"kr": "381180.KS", "us": None},
-        "바이오": {"kr": "244580.KS", "us": "XBI"},
-        "IT/소프트웨어": {"kr": "139260.KS", "us": "XLK"},
-        "에너지": {"kr": None, "us": "XLE"},
-        "금융": {"kr": None, "us": "XLF"},
-        "소비재": {"kr": None, "us": "XLY"},
-        "원자재": {"kr": "160580.KS", "us": "XLB"},
-    }
-
-    @st.cache_data(ttl=3600)
-    def get_sector_rs():
-        sector_scores = []
-        for sector, tickers in sector_etfs.items():
-            rs_vals = []
-            for region, tk in tickers.items():
-                if not tk:
-                    continue
-                try:
-                    d = yf.download(tk, period="1y", progress=False)
-                    if isinstance(d.columns, pd.MultiIndex):
-                        d.columns = d.columns.get_level_values(0)
-                    if not d.empty and len(d) > 126:
-                        c = d["Close"].values.astype(float)
-                        r3m = (c[-1] / c[-63] - 1) * 2
-                        r6m = (c[-63] / c[-126] - 1)
-                        rs_vals.append((r3m + r6m) * 100)
-                except:
-                    pass
-            if rs_vals:
-                sector_scores.append({"sector": sector, "rs": max(rs_vals)})
-        sector_scores.sort(key=lambda x: x["rs"], reverse=True)
-        return sector_scores
-
-    sector_rs = get_sector_rs()
-    if sector_rs:
-        top_sectors = sector_rs[:4]
-        sec_cols = st.columns(len(top_sectors))
-        for i, s in enumerate(top_sectors):
-            with sec_cols[i]:
-                st.markdown(
-                    f"<div class='signal-buy' style='text-align:center'>"
-                    f"<b>{s['sector']}</b><br>RS {s['rs']:+.0f}</div>",
-                    unsafe_allow_html=True,
-                )
-
-    st.divider()
-
-    # ── 종목 발굴 스크리너 ─────────────────────────
-    st.markdown("##### 종목 발굴 (한국+미국 개별주)")
-    scan_col1, scan_col2 = st.columns([1, 3])
-    with scan_col1:
-        scan_market = st.multiselect("시장", ["KR", "US"], default=["KR", "US"])
-        scan_min = st.slider("최소 점수", 20, 80, 40, 5, key="scan_min")
-        run_scan_btn = st.button("스캔 실행", type="primary")
-
-    with scan_col2:
-        if run_scan_btn:
-            from stock_scanner import run_scan
-            progress = st.progress(0, text="스캔 준비 중...")
-            def update_progress(pct, msg):
-                progress.progress(pct, text=msg)
-            scan_results = run_scan(
-                markets=tuple(scan_market),
-                min_score=scan_min,
-                progress_callback=update_progress,
-            )
-            progress.empty()
-            st.session_state["scan_results"] = scan_results
-
-        scan_results = st.session_state.get("scan_results", [])
-        if scan_results:
-            scan_data = []
-            for sr in scan_results[:30]:
-                signals = []
-                if sr.breakout_55d: signals.append("55일돌파")
-                elif sr.breakout_20d: signals.append("20일돌파")
-                if sr.stage2: signals.append("Stage2")
-                if sr.volume_ratio >= 1.5: signals.append(f"거래량{sr.volume_ratio:.1f}x")
-
-                scan_data.append({
-                    "점수": sr.total_score,
-                    "종목": sr.name,
-                    "티커": sr.ticker,
-                    "시장": sr.market,
-                    "현재가": f"{sr.price:,.0f}",
-                    "52주高%": f"-{sr.near_high_pct:.1f}%",
-                    "RS": f"{sr.rs_score:+.0f}",
-                    "신호": " | ".join(signals) if signals else "대기",
-                })
-            st.dataframe(
-                pd.DataFrame(scan_data),
-                use_container_width=True,
-                height=300,
-                hide_index=True,
-            )
-            st.caption(f"총 {len(scan_results)}종목 발견")
-        else:
-            st.caption("'스캔 실행' 버튼을 눌러 종목을 발굴하세요 (한국 45 + 미국 70종목)")
+    # (섹터→대장주 통합 뷰는 위 왼쪽 열에 포함됨)
 
     st.divider()
 
