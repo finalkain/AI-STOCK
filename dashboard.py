@@ -567,6 +567,59 @@ def main():
 
     st.divider()
 
+    # ── 강세 섹터 (상위 3~4개) ───────────────────
+    st.markdown("##### 강세 섹터 (상위)")
+    sector_etfs = {
+        "반도체": {"kr": "091160.KS", "us": "SMH"},
+        "2차전지": {"kr": "305540.KS", "us": "LIT"},
+        "방산": {"kr": "364690.KS", "us": "ITA"},
+        "조선": {"kr": "381180.KS", "us": None},
+        "바이오": {"kr": "244580.KS", "us": "XBI"},
+        "IT/소프트웨어": {"kr": "139260.KS", "us": "XLK"},
+        "에너지": {"kr": None, "us": "XLE"},
+        "금융": {"kr": None, "us": "XLF"},
+        "소비재": {"kr": None, "us": "XLY"},
+        "원자재": {"kr": "160580.KS", "us": "XLB"},
+    }
+
+    @st.cache_data(ttl=3600)
+    def get_sector_rs():
+        sector_scores = []
+        for sector, tickers in sector_etfs.items():
+            rs_vals = []
+            for region, tk in tickers.items():
+                if not tk:
+                    continue
+                try:
+                    d = yf.download(tk, period="1y", progress=False)
+                    if isinstance(d.columns, pd.MultiIndex):
+                        d.columns = d.columns.get_level_values(0)
+                    if not d.empty and len(d) > 126:
+                        c = d["Close"].values.astype(float)
+                        r3m = (c[-1] / c[-63] - 1) * 2
+                        r6m = (c[-63] / c[-126] - 1)
+                        rs_vals.append((r3m + r6m) * 100)
+                except:
+                    pass
+            if rs_vals:
+                sector_scores.append({"sector": sector, "rs": max(rs_vals)})
+        sector_scores.sort(key=lambda x: x["rs"], reverse=True)
+        return sector_scores
+
+    sector_rs = get_sector_rs()
+    if sector_rs:
+        top_sectors = sector_rs[:4]
+        sec_cols = st.columns(len(top_sectors))
+        for i, s in enumerate(top_sectors):
+            with sec_cols[i]:
+                st.markdown(
+                    f"<div class='signal-buy' style='text-align:center'>"
+                    f"<b>{s['sector']}</b><br>RS {s['rs']:+.0f}</div>",
+                    unsafe_allow_html=True,
+                )
+
+    st.divider()
+
     # ── 종목 발굴 스크리너 ─────────────────────────
     st.markdown("##### 종목 발굴 (한국+미국 개별주)")
     scan_col1, scan_col2 = st.columns([1, 3])
@@ -615,11 +668,9 @@ def main():
                 height=300,
                 hide_index=True,
             )
-            st.caption(f"총 {len(scan_results)}종목 발견 (한국 {len(KR_UNIVERSE)}+미국 {len(US_UNIVERSE)} 스캔)")
+            st.caption(f"총 {len(scan_results)}종목 발견")
         else:
-            st.caption("'스캔 실행' 버튼을 눌러 종목을 발굴하세요. (한국 45종목 + 미국 70종목)")
-
-    from stock_scanner import KR_UNIVERSE, US_UNIVERSE
+            st.caption("'스캔 실행' 버튼을 눌러 종목을 발굴하세요 (한국 45 + 미국 70종목)")
 
     st.divider()
 
