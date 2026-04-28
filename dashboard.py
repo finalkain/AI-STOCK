@@ -503,15 +503,82 @@ def main():
                 pnl_str = (f"매입가: {pos['avg_price']:,}원 × {pos['shares']}주<br>"
                            f"평가금: {eval_amt:,.0f}원 ({pnl_pct:+.1f}%, {pnl_amt:+,.0f}원)<br>")
 
+            # Time Stop 체크
+            time_stop_warn = ""
+            entry_date_str = pos.get("entry_date", "")
+            if entry_date_str and pos["shares"] > 0 and pos["avg_price"] > 0:
+                entry_dt = datetime.strptime(entry_date_str, "%Y-%m-%d").date()
+                days_held = (datetime.now().date() - entry_dt).days
+                if days_held >= 14:
+                    move_pct = abs((price - pos["avg_price"]) / pos["avg_price"] * 100)
+                    if move_pct <= 2.0:
+                        time_stop_warn = (
+                            f"<br><b>TIME STOP</b> — {days_held}일 경과, "
+                            f"수익률 ±{move_pct:.1f}% (정리 검토)"
+                        )
+
             st.markdown(f"""
 <div class="signal-hold">
 <b>{pos['asset']}</b><br>
 현재가: {price:,.0f}원<br>
 {pnl_str}Stop: {ts:,}원 ({ts_gap:.1f}%)<br>
 상태: {status}<br>
-{asset_r['alignment']} | 체제 {'OK' if asset_r['regime'] else 'X'}
+{asset_r['alignment']} | 체제 {'OK' if asset_r['regime'] else 'X'}{time_stop_warn}
 </div>
 """, unsafe_allow_html=True)
+
+            # ── 추가매수 시뮬레이터 (인라인) ──
+            if pos["shares"] > 0 and pos["avg_price"] > 0:
+                pos_key = pos["asset"].replace(" ", "_")
+                with st.expander(f"{pos['asset']} 추가매수 계산"):
+                    sim_cols = st.columns(2)
+                    add_shares = sim_cols[0].number_input(
+                        "추가 수량", min_value=1, value=1,
+                        key=f"add_qty_{pos_key}"
+                    )
+                    add_price = sim_cols[1].number_input(
+                        "매수 예정가", min_value=1,
+                        value=int(price),
+                        key=f"add_price_{pos_key}"
+                    )
+
+                    old_shares = pos["shares"]
+                    old_avg = pos["avg_price"]
+                    new_total = old_shares + add_shares
+                    new_avg = int((old_avg * old_shares + add_price * add_shares) / new_total)
+                    add_cost = add_price * add_shares
+
+                    # 같은 리스크(총자산의 risk_pct)로 새 Stop 계산
+                    max_risk = int(total * pf["risk_pct"])
+                    new_stop = int(new_avg - (max_risk / new_total))
+                    new_stop_pct = (new_avg - new_stop) / new_avg * 100 if new_avg > 0 else 0
+
+                    # ATR 기반 Stop (비교용)
+                    atr_stop = int(price - 2 * asset_r["atr20"])
+
+                    st.markdown(f"""
+<div class="signal-buy">
+<b>추가매수 시뮬레이션</b><br>
+현재: {old_shares}주 × 평균 {old_avg:,}원<br>
+추가: {add_shares}주 × {add_price:,}원 = {add_cost:,}원<br>
+<br>
+→ 합계: <b>{new_total}주</b> × 평균 <b>{new_avg:,}원</b><br>
+→ 리스크 {pf['risk_pct']*100:.1f}% 유지 Stop: <b>{new_stop:,}원</b> (-{new_stop_pct:.1f}%)<br>
+→ ATR 기반 Stop (참고): {atr_stop:,}원<br>
+→ 최대 손실: {max_risk:,}원 (총자산의 {pf['risk_pct']*100:.1f}%)
+</div>""", unsafe_allow_html=True)
+
+                    if new_stop > ts:
+                        st.markdown(f"""
+<div class="signal-hold">
+Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
+</div>""", unsafe_allow_html=True)
+                    elif new_stop < ts:
+                        st.markdown(f"""
+<div class="signal-none">
+주의: 새 Stop({new_stop:,}) < 현재 Stop({ts:,})<br>
+리스크 유지를 위해 현재 Stop을 내리지 마세요
+</div>""", unsafe_allow_html=True)
 
         # ── 진입/애드업 계산기 ──────────────────
         calc_tab1, calc_tab2 = st.tabs(["진입 계산기", "애드업 계산기"])
@@ -679,13 +746,45 @@ def main():
     st.divider()
 
     # ── 하단: M1 심리 + M2 매크로 ────────────────
-    from macro_data import get_market_sentiment, get_fred_data, get_next_fomc
-    from news_feed import get_news_summary
+    from macro_data import (get_market_sentiment, get_fred_data, get_next_fomc,
+                            get_vix_percentile, get_fear_greed_index, get_rate_outlook)
+    from news_feed import get_news_summary, detect_divergence
 
     bottom_left, bottom_right = st.columns(2)
 
     with bottom_left:
         st.markdown("##### M1 시장 심리")
+
+        # Fear & Greed 종합 지수
+        fg = get_fear_greed_index()
+        if fg:
+            st.markdown(f"""
+<div class="signal-buy" style="text-align:center">
+<span style="font-size:2em"><b>{fg['composite']}</b></span><br>
+{fg['label']}
+</div>""", unsafe_allow_html=True)
+            with st.expander("Fear & Greed 구성요소"):
+                for name, comp in fg["components"].items():
+                    st.markdown(f"- **{name}**: {comp['score']}/100 — {comp['detail']}")
+
+        # VIX 백분위
+        vix_pct = get_vix_percentile()
+        if vix_pct:
+            st.markdown(f"""
+<div class="signal-hold">
+VIX {vix_pct['current']} = 역사적 <b>{vix_pct['percentile']}번째 백분위</b> ({vix_pct['label']}) | {vix_pct['years']}년 데이터 기준
+</div>""", unsafe_allow_html=True)
+
+        # 뉴스-시장 괴리
+        div = detect_divergence()
+        if div and div["alert"]:
+            st.markdown(f"""
+<div class="signal-buy">
+<b>뉴스-시장 괴리: {div['type']}</b><br>
+{div['description']}
+</div>""", unsafe_allow_html=True)
+        elif div:
+            st.caption(div["description"])
 
         # 정량 지표
         sentiment = get_market_sentiment()
@@ -693,7 +792,6 @@ def main():
             sent_cols = st.columns(len(sentiment))
             for i, (key, s) in enumerate(sentiment.items()):
                 with sent_cols[i]:
-                    level = s.get("level", "")
                     st.markdown(f"<small>{s['name']}</small><br><b>{s['value']}</b>",
                                 unsafe_allow_html=True)
 
@@ -709,25 +807,22 @@ def main():
 <div class="signal-buy">
 <b>[{n.source}]</b> <a href="{n.link}" target="_blank" style="color:{COLORS['text']};text-decoration:none;">{n.title}</a><br>
 <small>{n.published}</small>
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
         tab_us, tab_kr = st.tabs(["미국 뉴스", "한국 뉴스"])
 
         with tab_us:
-            if news["us"]:
-                for n in news["us"][:10]:
-                    imp = "**" if n.is_important else ""
-                    st.markdown(f"- {imp}[{n.source}]{imp} [{n.title}]({n.link})")
-            else:
+            for n in (news["us"] or [])[:10]:
+                imp = "**" if n.is_important else ""
+                st.markdown(f"- {imp}[{n.source}]{imp} [{n.title}]({n.link})")
+            if not news["us"]:
                 st.caption("미국 경제 뉴스 없음")
 
         with tab_kr:
-            if news["kr"]:
-                for n in news["kr"][:10]:
-                    imp = "**" if n.is_important else ""
-                    st.markdown(f"- {imp}[{n.source}]{imp} [{n.title}]({n.link})")
-            else:
+            for n in (news["kr"] or [])[:10]:
+                imp = "**" if n.is_important else ""
+                st.markdown(f"- {imp}[{n.source}]{imp} [{n.title}]({n.link})")
+            if not news["kr"]:
                 st.caption("한국 경제 뉴스 없음")
 
     with bottom_right:
@@ -738,8 +833,17 @@ def main():
 <div class="signal-buy">
 <b>다음 FOMC</b>: {fomc['date']}<br>
 D-{fomc['days_left']}일 {fomc['sep']}
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
+
+        # 금리 전망
+        rate = get_rate_outlook()
+        if rate:
+            st.markdown(f"""
+<div class="signal-hold">
+<b>금리 전망</b><br>
+10Y: {rate['tnx']}% | 3M: {rate['irx']}% | 스프레드: {rate['spread']}%p ({rate['direction']})<br>
+{rate['outlook']}
+</div>""", unsafe_allow_html=True)
 
         fred_key = st.secrets.get("fred_api_key", "")
         fred_data = get_fred_data(fred_key) if fred_key else None
@@ -758,16 +862,12 @@ D-{fomc['days_left']}일 {fomc['sep']}
                     st.markdown(f"""
 <div class="signal-hold">
 {d['name']}: <b>{d['value']}</b> ({d['change']}) <small>{d['date']}</small>
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
         else:
             st.markdown("""
 <div class="signal-none">
-FRED API 키 미설정<br>
-Settings → Secrets에 추가:<br>
-<code>fred_api_key = "your_key"</code>
-</div>
-""", unsafe_allow_html=True)
+FRED API 키 미설정 — Secrets에 fred_api_key 추가
+</div>""", unsafe_allow_html=True)
 
     # 포트폴리오 저장
     save_portfolio(pf)

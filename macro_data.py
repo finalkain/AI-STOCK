@@ -197,3 +197,160 @@ def get_market_sentiment():
         pass
 
     return result
+
+
+# ═══════════════════════════════════════════════════
+#  VIX 역사적 백분위
+# ═══════════════════════════════════════════════════
+
+def get_vix_percentile():
+    """현재 VIX가 역사적으로 몇 번째 백분위인지"""
+    try:
+        data = yf.download("^VIX", period="max", progress=False)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        if data.empty or len(data) < 100:
+            return None
+
+        closes = data["Close"].dropna().values.astype(float)
+        current = closes[-1]
+        percentile = int(np.sum(closes < current) / len(closes) * 100)
+
+        if percentile >= 80: label = "극단적 공포 구간"
+        elif percentile >= 60: label = "경계 구간"
+        elif percentile >= 40: label = "보통"
+        elif percentile >= 20: label = "안정적"
+        else: label = "극단적 안도 (과열 주의)"
+
+        return {
+            "current": round(current, 1),
+            "percentile": percentile,
+            "label": label,
+            "median": round(float(np.median(closes)), 1),
+            "years": int(len(closes) / 252),
+        }
+    except Exception:
+        return None
+
+
+# ═══════════════════════════════════════════════════
+#  금리 전망 (FedWatch 대체)
+# ═══════════════════════════════════════════════════
+
+def get_rate_outlook():
+    """10년-3개월 스프레드로 금리/경기 전망"""
+    try:
+        data = yf.download(["^TNX", "^IRX"], period="6mo", progress=False)
+        if data.empty:
+            return None
+
+        if isinstance(data.columns, pd.MultiIndex):
+            tnx = data[("Close", "^TNX")].dropna()
+            irx = data[("Close", "^IRX")].dropna()
+        else:
+            return None
+
+        if len(tnx) < 20 or len(irx) < 20:
+            return None
+
+        tnx_now = float(tnx.iloc[-1])
+        irx_now = float(irx.iloc[-1])
+        spread_now = tnx_now - irx_now
+        spread_1m = float(tnx.iloc[-20]) - float(irx.iloc[-20])
+        spread_change = spread_now - spread_1m
+
+        if spread_change > 0.15: direction = "확대 중"
+        elif spread_change < -0.15: direction = "축소 중"
+        else: direction = "횡보"
+
+        if spread_now < 0: outlook = "역전 — 경기침체 경고"
+        elif spread_now < 0.5: outlook = "평탄 — 경기둔화 가능"
+        elif direction == "확대 중": outlook = "정상화 — 금리인하 기대"
+        else: outlook = "정상 — 안정적"
+
+        return {
+            "tnx": round(tnx_now, 2), "irx": round(irx_now, 2),
+            "spread": round(spread_now, 2),
+            "direction": direction, "outlook": outlook,
+        }
+    except Exception:
+        return None
+
+
+# ═══════════════════════════════════════════════════
+#  Fear & Greed 종합 지수 (자체 계산, API 불필요)
+# ═══════════════════════════════════════════════════
+
+def get_fear_greed_index():
+    """0(극단적 공포) ~ 100(극단적 탐욕). yfinance만 사용."""
+    try:
+        data = yf.download(["^VIX", "SPY", "TLT"], period="1y", progress=False)
+        if data.empty:
+            return None
+
+        if not isinstance(data.columns, pd.MultiIndex):
+            return None
+
+        vix_c = data[("Close", "^VIX")].dropna()
+        spy_c = data[("Close", "SPY")].dropna()
+        tlt_c = data[("Close", "TLT")].dropna()
+
+        components = {}
+        weights = {}
+        tw = 0
+
+        # 1. VIX 수준 (30%)
+        if len(vix_c) > 100:
+            vix_now = float(vix_c.iloc[-1])
+            pct = np.sum(vix_c.values < vix_now) / len(vix_c) * 100
+            score = max(0, min(100, 100 - pct))
+            components["VIX 수준"] = {"score": int(score), "detail": f"VIX {vix_now:.1f} (백분위 {int(pct)}%)"}
+            weights["VIX 수준"] = 0.30; tw += 0.30
+
+        # 2. 시장 모멘텀 (25%) — SPY vs 125일선
+        if len(spy_c) >= 125:
+            spy_now = float(spy_c.iloc[-1])
+            ma125 = float(spy_c.iloc[-125:].mean())
+            score = max(0, min(100, 50 + (spy_now / ma125 - 1) * 500))
+            components["시장 모멘텀"] = {"score": int(score), "detail": f"SPY vs MA125 {(spy_now/ma125-1)*100:+.1f}%"}
+            weights["시장 모멘텀"] = 0.25; tw += 0.25
+
+        # 3. VIX 기간구조 (20%)
+        if len(vix_c) >= 60:
+            vix_now = float(vix_c.iloc[-1])
+            vix_avg60 = float(vix_c.iloc[-60:].mean())
+            ratio = vix_now / vix_avg60 if vix_avg60 > 0 else 1
+            score = max(0, min(100, (1.3 - ratio) / 0.6 * 100))
+            components["VIX 기간구조"] = {"score": int(score), "detail": f"현재/60일 = {ratio:.2f}"}
+            weights["VIX 기간구조"] = 0.20; tw += 0.20
+
+        # 4. 안전자산 선호 (15%)
+        if len(spy_c) >= 20 and len(tlt_c) >= 20:
+            spy_ret = (float(spy_c.iloc[-1]) / float(spy_c.iloc[-20]) - 1) * 100
+            tlt_ret = (float(tlt_c.iloc[-1]) / float(tlt_c.iloc[-20]) - 1) * 100
+            score = max(0, min(100, 50 + (spy_ret - tlt_ret) * 5))
+            components["안전자산 선호"] = {"score": int(score), "detail": f"SPY {spy_ret:+.1f}% vs TLT {tlt_ret:+.1f}%"}
+            weights["안전자산 선호"] = 0.15; tw += 0.15
+
+        # 5. 변동성 추세 (10%)
+        if len(vix_c) >= 20:
+            vix_change = (float(vix_c.iloc[-1]) / float(vix_c.iloc[-20]) - 1) * 100
+            score = max(0, min(100, 50 - vix_change * 3))
+            components["변동성 추세"] = {"score": int(score), "detail": f"VIX 20일 {vix_change:+.1f}%"}
+            weights["변동성 추세"] = 0.10; tw += 0.10
+
+        if tw == 0:
+            return None
+
+        composite = sum(components[n]["score"] * (weights[n] / tw) for n in weights)
+        composite = int(composite)
+
+        if composite <= 20: label = "극단적 공포"
+        elif composite <= 40: label = "공포"
+        elif composite <= 60: label = "중립"
+        elif composite <= 80: label = "탐욕"
+        else: label = "극단적 탐욕"
+
+        return {"composite": composite, "label": label, "components": components}
+    except Exception:
+        return None

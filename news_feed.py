@@ -281,3 +281,79 @@ def get_news_summary(max_items: int = 20):
         "important": [n for n in news if n.is_important][:10],
         "total": len(news),
     }
+
+
+# ═══════════════════════════════════════════════════
+#  뉴스 vs 시장반응 괴리 감지
+# ═══════════════════════════════════════════════════
+
+POSITIVE_KW = [
+    r"\b(rally|surge|soar|jump|rise|gain|record.high|bull|rebound|recovery)\b",
+    r"(급등|폭등|상승|반등|랠리|회복|사상.?최고|신고가|강세|호조)",
+]
+NEGATIVE_KW = [
+    r"\b(crash|plunge|tumble|fall|drop|sink|slide|sell.?off|bear|recession|crisis|collapse|panic)\b",
+    r"(급락|폭락|하락|조정|위기|침체|패닉|공포|약세|부진|붕괴)",
+]
+
+
+def classify_news_sentiment(title: str) -> str:
+    import re
+    t = title.lower()
+    pos = sum(1 for p in POSITIVE_KW if re.search(p, t) or re.search(p, title))
+    neg = sum(1 for p in NEGATIVE_KW if re.search(p, t) or re.search(p, title))
+    if pos > neg: return "positive"
+    if neg > pos: return "negative"
+    return "neutral"
+
+
+def detect_divergence():
+    """뉴스 감성 vs 시장 실제 반응 비교 → 괴리 감지"""
+    import yfinance as yf
+
+    news = fetch_all_news(max_per_source=5)
+    if not news:
+        return None
+
+    pos_count = sum(1 for n in news if classify_news_sentiment(n.title) == "positive")
+    neg_count = sum(1 for n in news if classify_news_sentiment(n.title) == "negative")
+    total = pos_count + neg_count
+    if total == 0:
+        return None
+
+    news_tone = (pos_count - neg_count) / total  # -1 ~ +1
+
+    try:
+        spy = yf.download("SPY", period="5d", progress=False)
+        if isinstance(spy.columns, __import__('pandas').MultiIndex):
+            spy.columns = spy.columns.get_level_values(0)
+        if len(spy) < 2:
+            return None
+        mkt_return = (float(spy["Close"].iloc[-1]) / float(spy["Close"].iloc[-2]) - 1) * 100
+    except Exception:
+        return None
+
+    divergence_type = "없음"
+    alert = False
+    description = ""
+
+    if news_tone < -0.3 and mkt_return > 0.3:
+        divergence_type = "강세 괴리"
+        alert = True
+        description = f"부정 뉴스 {neg_count}건 vs 시장 +{mkt_return:.1f}% = 악재 소진 가능"
+    elif news_tone > 0.3 and mkt_return < -0.3:
+        divergence_type = "약세 괴리"
+        alert = True
+        description = f"긍정 뉴스 {pos_count}건 vs 시장 {mkt_return:.1f}% = 호재 소진 가능"
+    else:
+        description = f"뉴스 톤 {news_tone:+.1f} / 시장 {mkt_return:+.1f}% — 괴리 없음"
+
+    return {
+        "type": divergence_type,
+        "alert": alert,
+        "description": description,
+        "news_tone": round(news_tone, 2),
+        "market_return": round(mkt_return, 2),
+        "positive": pos_count,
+        "negative": neg_count,
+    }
