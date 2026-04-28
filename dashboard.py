@@ -634,7 +634,7 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                 st.caption("ATR 데이터 부족")
 
         with calc_tab2:
-            st.markdown("##### 애드업 (추가매수)")
+            st.markdown("##### 애드업 (추가매수) — 리스크 비례")
             held_positions = [p for p in pf["positions"] if p["shares"] > 0]
             if not held_positions:
                 st.caption("보유 종목 없음")
@@ -651,57 +651,63 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                     avg = addup_pos["avg_price"]
                     shares_held = addup_pos["shares"]
                     cur_stop = addup_pos.get("trailing_stop", 0)
-
-                    # 피봇 = 현재 Stop + 2*ATR (대략 직전 돌파 수준)
-                    pivot = cur_stop + 2 * cur_atr if cur_stop > 0 else cur_price
-                    addup1_price = int(pivot * 1.025)
-                    addup2_price = int(pivot * 1.05)
-
-                    # 추가매수 수량 (동일 리스크)
-                    risk_ps = 2 * cur_atr
-                    addup_qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
-                    new_stop = int(pivot * 0.97)
-
                     cur_pnl_pct = (cur_price - avg) / avg * 100 if avg > 0 else 0
 
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{addup_asset}</b><br>
-현재: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%)<br>
-보유: {shares_held}주 × 평균 {avg:,}원<br>
-현재 Stop: {cur_stop:,}원
-</div>
-""", unsafe_allow_html=True)
+<b>{addup_asset}</b> | 현재가: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%)<br>
+보유: {shares_held}주 × 평균 {avg:,}원 | Stop: {cur_stop:,}원
+</div>""", unsafe_allow_html=True)
 
-                    ready1 = "진입 가능" if cur_price >= addup1_price else f"{addup1_price - cur_price:,}원 남음"
-                    ready2 = "진입 가능" if cur_price >= addup2_price else f"{addup2_price - cur_price:,}원 남음"
+                    st.markdown("---")
+                    add_qty = st.number_input("추가 수량 (주)", 1, 100, 1, key="addup_qty2")
+                    add_price = st.number_input("매수 예정가 (원)", 1, 9999999,
+                                                int(cur_price), key="addup_price2")
+
+                    new_total = shares_held + add_qty
+                    new_avg = int((avg * shares_held + add_price * add_qty) / new_total)
+                    add_cost = add_price * add_qty
+
+                    # 같은 리스크 유지 Stop
+                    max_risk = int(total * pf["risk_pct"])
+                    risk_stop = int(new_avg - (max_risk / new_total))
+                    risk_stop_pct = (new_avg - risk_stop) / new_avg * 100 if new_avg > 0 else 0
+
+                    # ATR 기반 Stop (참고)
+                    atr_stop = int(cur_price - 2 * cur_atr)
+
+                    # 추천 Stop (둘 중 높은 것 = 더 보수적)
+                    rec_stop = max(risk_stop, atr_stop)
 
                     st.markdown(f"""
 <div class="signal-buy">
-<b>1차 애드업</b> (피봇+2.5%)<br>
-가격: {addup1_price:,}원 | {ready1}<br>
-수량: {addup_qty}주 | Stop 상향: {new_stop:,}원
-</div>
-""", unsafe_allow_html=True)
+<b>추가매수 후 변화</b><br>
+현재: {shares_held}주 × {avg:,}원<br>
+추가: +{add_qty}주 × {add_price:,}원 = {add_cost:,}원<br>
+합계: <b>{new_total}주 × {new_avg:,}원</b>
+</div>""", unsafe_allow_html=True)
 
-                    new_stop2 = int(addup1_price * 0.97)
                     st.markdown(f"""
 <div class="signal-buy">
-<b>2차 애드업</b> (피봇+5%)<br>
-가격: {addup2_price:,}원 | {ready2}<br>
-수량: {addup_qty}주 | Stop 상향: {new_stop2:,}원
-</div>
-""", unsafe_allow_html=True)
+<b>새 Stop 가격</b><br>
+리스크 {pf['risk_pct']*100:.1f}% 유지: <b>{risk_stop:,}원</b> (-{risk_stop_pct:.1f}%)<br>
+ATR 기반 (2×ATR): {atr_stop:,}원<br>
+권장 (높은 값): <b>{rec_stop:,}원</b><br>
+최대 손실: {max_risk:,}원
+</div>""", unsafe_allow_html=True)
 
-                    if cur_price >= addup1_price:
-                        total_shares = shares_held + addup_qty
-                        new_avg = (avg * shares_held + cur_price * addup_qty) / total_shares
+                    # Stop 변동 경고
+                    if rec_stop > cur_stop:
                         st.markdown(f"""
 <div class="signal-hold">
-애드업 후: {total_shares}주 × 평균 {new_avg:,.0f}원<br>
-새 Stop: {new_stop:,}원
-</div>
-""", unsafe_allow_html=True)
+Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
+</div>""", unsafe_allow_html=True)
+                    elif rec_stop < cur_stop:
+                        st.markdown(f"""
+<div class="signal-none">
+주의: 새 Stop({rec_stop:,}) < 현재({cur_stop:,})<br>
+현재 Stop을 내리지 마세요. 리스크 초과됩니다.
+</div>""", unsafe_allow_html=True)
 
     st.divider()
 
