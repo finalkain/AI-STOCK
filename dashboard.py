@@ -128,13 +128,75 @@ def load_portfolio():
     return json.loads(json.dumps(DEFAULT_PORTFOLIO))
 
 
-def save_portfolio(pf):
+def save_portfolio(pf, commit_msg=None):
+    """로컬 저장 + (commit_msg 지정 시) GitHub 커밋.
+
+    Streamlit Cloud 컨테이너 파일시스템은 휘발성이므로,
+    실제 거래 적용은 반드시 commit_msg 를 넘겨 GitHub 에 영속화해야 한다.
+    """
     try:
         os.makedirs(PORTFOLIO_FILE.parent, exist_ok=True)
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
             json.dump(pf, f, ensure_ascii=False, indent=2)
-    except:
-        pass
+    except Exception as e:
+        st.error(f"로컬 저장 실패: {e}")
+        return False
+
+    if commit_msg:
+        return _save_to_github(pf, commit_msg)
+    return True
+
+
+def _save_to_github(pf, commit_msg):
+    """GitHub Contents API 로 data/portfolio.json 을 커밋한다."""
+    import base64
+    import requests as _req
+
+    token = st.secrets.get("github_token", "")
+    repo = st.secrets.get("github_repo", "")
+    branch = st.secrets.get("github_branch", "main")
+    path = "data/portfolio.json"
+
+    if not token or not repo:
+        st.warning(
+            "GitHub 영속화 비활성: Streamlit Secrets 에 "
+            "`github_token` 과 `github_repo` 를 등록하세요. "
+            "(현재는 컨테이너 재시작 시 변경이 사라집니다)"
+        )
+        return True
+
+    api = f"https://api.github.com/repos/{repo}/contents/{path}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    try:
+        r = _req.get(api, headers=headers, params={"ref": branch}, timeout=10)
+        sha = r.json().get("sha") if r.status_code == 200 else None
+    except Exception as e:
+        st.error(f"GitHub SHA 조회 실패: {e}")
+        return False
+
+    body = json.dumps(pf, ensure_ascii=False, indent=2)
+    payload = {
+        "message": commit_msg,
+        "content": base64.b64encode(body.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        r = _req.put(api, headers=headers, json=payload, timeout=15)
+        if r.status_code in (200, 201):
+            return True
+        st.error(f"GitHub 저장 실패: HTTP {r.status_code} — {r.text[:200]}")
+        return False
+    except Exception as e:
+        st.error(f"GitHub 저장 실패: {e}")
+        return False
 
 
 def calc_rs(data):
@@ -580,8 +642,39 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
 리스크 유지를 위해 현재 Stop을 내리지 마세요
 </div>""", unsafe_allow_html=True)
 
-        # ── 진입/애드업 계산기 ──────────────────
-        calc_tab1, calc_tab2 = st.tabs(["진입 계산기", "애드업 계산기"])
+                    # 권장 Stop (보수적: 셋 중 높은 값)
+                    apply_stop = max(new_stop, atr_stop, ts)
+
+                    if st.button("추가매수 적용", key=f"apply_add_{pos_key}", type="primary"):
+                        if add_cost > pf["cash"]:
+                            st.error(f"현금 부족: 필요 {add_cost:,}원 / 보유 {pf['cash']:,}원")
+                        else:
+                            pos["shares"] = new_total
+                            pos["avg_price"] = new_avg
+                            pos["trailing_stop"] = apply_stop
+                            pos["current_value"] = int(price * new_total)
+                            pf["cash"] -= add_cost
+                            pf["journal"].append({
+                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "action": "ADD",
+                                "asset": pos["asset"],
+                                "shares": add_shares,
+                                "price": add_price,
+                                "reason": "추가매수 (대시보드)",
+                            })
+                            ok = save_portfolio(
+                                pf,
+                                commit_msg=f"ADD {pos['asset']} +{add_shares}주 @ {add_price:,}원",
+                            )
+                            if ok:
+                                st.success(
+                                    f"적용 완료: +{add_shares}주 @ {add_price:,}원 "
+                                    f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop:,}원"
+                                )
+                                st.rerun()
+
+        # ── 진입/애드업 계산기 + 매도 ──────────
+        calc_tab1, calc_tab2, calc_tab3 = st.tabs(["진입 계산기", "애드업 계산기", "매도"])
 
         with calc_tab1:
             st.markdown("##### 신규 진입 계산")
@@ -708,6 +801,121 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
 주의: 새 Stop({rec_stop:,}) < 현재({cur_stop:,})<br>
 현재 Stop을 내리지 마세요. 리스크 초과됩니다.
 </div>""", unsafe_allow_html=True)
+
+                    apply_stop2 = max(rec_stop, cur_stop)
+
+                    if st.button("추가매수 적용", key="apply_addup_tab", type="primary"):
+                        if add_cost > pf["cash"]:
+                            st.error(f"현금 부족: 필요 {add_cost:,}원 / 보유 {pf['cash']:,}원")
+                        else:
+                            addup_pos["shares"] = new_total
+                            addup_pos["avg_price"] = new_avg
+                            addup_pos["trailing_stop"] = apply_stop2
+                            addup_pos["current_value"] = int(cur_price * new_total)
+                            pf["cash"] -= add_cost
+                            pf["journal"].append({
+                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "action": "ADD",
+                                "asset": addup_asset,
+                                "shares": add_qty,
+                                "price": add_price,
+                                "reason": "추가매수 (애드업 탭)",
+                            })
+                            ok = save_portfolio(
+                                pf,
+                                commit_msg=f"ADD {addup_asset} +{add_qty}주 @ {add_price:,}원",
+                            )
+                            if ok:
+                                st.success(
+                                    f"적용 완료: +{add_qty}주 @ {add_price:,}원 "
+                                    f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop2:,}원"
+                                )
+                                st.rerun()
+
+        with calc_tab3:
+            st.markdown("##### 매도 적용")
+            sellable = [p for p in pf["positions"] if p["shares"] > 0]
+            if not sellable:
+                st.caption("보유 종목 없음")
+            else:
+                sell_asset = st.selectbox(
+                    "종목", [p["asset"] for p in sellable], key="sell_asset"
+                )
+                sell_pos = next(p for p in sellable if p["asset"] == sell_asset)
+                sell_r = next((r for r in results if r["name"] == sell_asset), None)
+                ref_price = int(sell_r["price"]) if sell_r else int(sell_pos["avg_price"])
+                held_qty = sell_pos["shares"]
+                avg_buy = sell_pos["avg_price"]
+
+                st.markdown(f"""
+<div class="signal-hold">
+<b>{sell_asset}</b> | 현재가: {ref_price:,}원<br>
+보유: {held_qty}주 × 평균 {avg_buy:,}원
+</div>""", unsafe_allow_html=True)
+
+                sell_cols = st.columns(2)
+                sell_qty = sell_cols[0].number_input(
+                    "매도 수량", min_value=1, max_value=held_qty,
+                    value=held_qty, key="sell_qty"
+                )
+                sell_price = sell_cols[1].number_input(
+                    "매도 가격", min_value=1, max_value=99999999,
+                    value=ref_price, key="sell_price"
+                )
+                sell_reason = st.text_input(
+                    "매도 사유", value="",
+                    placeholder="예: Stop 이탈 / Time Stop / 익절 / 신호 소실",
+                    key="sell_reason",
+                )
+
+                proceeds = sell_qty * sell_price
+                pnl_amt = (sell_price - avg_buy) * sell_qty
+                pnl_pct = (sell_price - avg_buy) / avg_buy * 100 if avg_buy > 0 else 0
+                remain = held_qty - sell_qty
+                fully_close = (sell_qty >= held_qty)
+
+                st.markdown(f"""
+<div class="signal-buy">
+<b>매도 시뮬레이션</b><br>
+{sell_qty}주 × {sell_price:,}원 = <b>{proceeds:,}원</b> 회수<br>
+손익: <b>{pnl_amt:+,.0f}원</b> ({pnl_pct:+.1f}%)<br>
+잔여: {remain}주 {"(전량 매도 — 포지션 제거)" if fully_close else ""}<br>
+적용 후 현금: {pf["cash"] + proceeds:,}원
+</div>""", unsafe_allow_html=True)
+
+                if st.button("매도 적용", key="apply_sell", type="primary"):
+                    pf["cash"] += proceeds
+                    pf["journal"].append({
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "action": "SELL",
+                        "asset": sell_asset,
+                        "shares": sell_qty,
+                        "price": sell_price,
+                        "pnl": int(pnl_amt),
+                        "reason": sell_reason or "매도",
+                    })
+                    if fully_close:
+                        pf["positions"] = [
+                            p for p in pf["positions"] if p["asset"] != sell_asset
+                        ]
+                        sell_kind = "SELL ALL"
+                    else:
+                        sell_pos["shares"] = remain
+                        sell_pos["current_value"] = int(ref_price * remain)
+                        sell_kind = "SELL"
+                    ok = save_portfolio(
+                        pf,
+                        commit_msg=(
+                            f"{sell_kind} {sell_asset} {sell_qty}주 @ {sell_price:,}원 "
+                            f"(PnL {pnl_amt:+,.0f}원)"
+                        ),
+                    )
+                    if ok:
+                        st.success(
+                            f"매도 적용: {sell_qty}주 @ {sell_price:,}원, "
+                            f"손익 {pnl_amt:+,.0f}원"
+                        )
+                        st.rerun()
 
     st.divider()
 
