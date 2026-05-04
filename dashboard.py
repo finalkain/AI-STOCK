@@ -453,35 +453,95 @@ def main():
         all_sectors = st.session_state.get("all_sectors", [])
 
         if sector_results:
-            # ── 매수 적기 종목 (절대 기준 충족) ───
-            buy_ready = []
+            # ── 시장 체제 (KOSPI / S&P500) ────────
+            def _regime_status(name):
+                if name not in all_data:
+                    return None
+                d = all_data[name]
+                cs = d["Close"].values.astype(float)
+                if len(cs) < 50:
+                    return None
+                p, ma20, ma50 = cs[-1], np.mean(cs[-20:]), np.mean(cs[-50:])
+                above20, above50 = p > ma20, p > ma50
+                if above20 and above50:
+                    return f"{name}: 강세 (20일선 +{(p/ma20-1)*100:.1f}%, 50일선 +{(p/ma50-1)*100:.1f}%)"
+                if above50:
+                    return f"{name}: 중립 (50일선 위, 20일선 아래)"
+                return f"{name}: 약세 (50일선 이탈)"
+
+            regime_lines = [r for r in [_regime_status("KOSPI"), _regime_status("S&P500")] if r]
+            both_strong = all(
+                ("강세" in r) for r in regime_lines
+            ) if regime_lines else False
+            any_weak = any(("약세" in r) for r in regime_lines)
+            if regime_lines:
+                badge_class = "signal-buy" if both_strong else (
+                    "signal-none" if any_weak else "signal-hold"
+                )
+                regime_advice = (
+                    "적극 매매" if both_strong else
+                    "신규 매수 중단·현금 확대 권고" if any_weak else
+                    "선별 매수"
+                )
+                st.markdown(f"""
+<div class="{badge_class}">
+<b>시장 체제</b> — {regime_advice}<br>
+{('<br>'.join(regime_lines))}
+</div>""", unsafe_allow_html=True)
+
+            # ── 거래대금 표시 헬퍼 ───────────────
+            def _fmt_turnover(s):
+                if s.is_kr:
+                    if s.turnover_20d >= 1e8:
+                        return f"{s.turnover_20d/1e8:.0f}억"
+                    return f"{s.turnover_20d/1e4:.0f}만"
+                if s.turnover_20d >= 1e6:
+                    return f"${s.turnover_20d/1e6:.0f}M"
+                return f"${s.turnover_20d/1e3:.0f}K"
+
+            # ── 매수 적기 (A급) + 관찰 (B급) ─────
+            buy_ready, watch_list = [], []
             for sr in sector_results:
                 for s in sr.leaders:
                     if s.is_buy_timing:
                         buy_ready.append((sr.name, s))
+                    elif s.is_watch:
+                        watch_list.append((sr.name, s))
 
             if buy_ready:
                 st.markdown(f"""
 <div class="signal-buy">
-<b>매수 적기 — {len(buy_ready)}종목</b> (저항선 돌파 + Stage2 + 거래량 + 미확장)
+<b>매수 적기 (A급) — {len(buy_ready)}종목</b><br>
+<small>Stage2 + 돌파 + 거래량 + 피벗≤2% + 거래대금 + ATR%≤6% + 손절≤8% + 갭&lt;3%</small>
 </div>""", unsafe_allow_html=True)
                 for sector_name, s in buy_ready:
                     stop = s.price - 2 * s.atr20
                     risk_ps = 2 * s.atr20
                     qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
                     brk = "55일돌파" if s.breakout_55d else "20일돌파"
+                    gap_str = f"{s.gap_pct:+.1f}%" if abs(s.gap_pct) >= 0.1 else "0%"
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x<br>
-현재가: {s.price:,.0f} | 손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능
+<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
+현재가: {s.price:,.0f} | 손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>
+<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}%</small>
 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown(f"""
 <div class="signal-none">
 <b>매수 적기 종목 없음</b><br>
-모든 조건(Stage2 + 돌파 + 거래량 + 미확장)을<br>
-동시에 만족하는 종목이 없습니다.<br>
+한국형 미너비니 8개 필터를 동시 만족하는 종목 없음.<br>
 <i>거래하지 않는 것도 포지션입니다.</i>
+</div>""", unsafe_allow_html=True)
+
+            if watch_list:
+                with st.expander(f"관찰 등급 (B급) — {len(watch_list)}종목 (피벗 ≤5%)"):
+                    for sector_name, s in watch_list:
+                        brk = "55일돌파" if s.breakout_55d else "20일돌파" if s.breakout_20d else "추세"
+                        st.markdown(f"""
+<div class="signal-none">
+<b>{s.name}</b> ({sector_name}) — {brk} · 피벗+{s.extended_pct:.1f}%<br>
+<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}%</small>
 </div>""", unsafe_allow_html=True)
 
             st.markdown("---")
@@ -500,7 +560,10 @@ def main():
                             "점수": s.score,
                             "종목": s.name,
                             "현재가": f"{s.price:,.0f}",
+                            "거래대금": _fmt_turnover(s),
+                            "ATR%": f"{s.atr_pct:.1f}",
                             "52주高": f"-{s.near_high_pct:.1f}%",
+                            "필터": s.filter_status,
                             "신호": s.signal,
                         })
                     st.dataframe(
@@ -709,10 +772,21 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                 cost = qty * price
                 stop_pct = risk_per_share / price * 100
 
-                # R배수 목표가
+                # ── 거래비용 (한국주 가정: 매도세 0.20% + 매매수수료 왕복 0.03% ≈ 0.23%) ──
+                FEE_PCT = 0.23
+                breakeven_price = price * (1 + FEE_PCT / 100)
+
+                # R배수 목표가 (gross)
                 r1 = price + 1 * risk_per_share
                 r2 = price + 2 * risk_per_share
                 r3 = price + 3 * risk_per_share
+
+                # R배수 (net = 거래비용 차감)
+                fee_per_share = price * FEE_PCT / 100
+                r_eff = risk_per_share + fee_per_share  # 비용 반영한 실효 1R 거리
+                r1_net_pct = (r1 - price - fee_per_share) / price * 100
+                r2_net_pct = (r2 - price - fee_per_share) / price * 100
+                r3_net_pct = (r3 - price - fee_per_share) / price * 100
 
                 affordable = "O" if cost <= cash else "X"
 
@@ -735,12 +809,21 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
 
                 st.markdown(f"""
 <div class="signal-hold">
-<b>목표가 (R배수)</b><br>
-1R (1:1): {r1:,.0f}원 (+{(r1/price-1)*100:.1f}%)<br>
-2R (2:1): {r2:,.0f}원 (+{(r2/price-1)*100:.1f}%)<br>
-3R (3:1): {r3:,.0f}원 (+{(r3/price-1)*100:.1f}%)
+<b>목표가 (R배수, gross / net)</b><br>
+손익분기: {breakeven_price:,.0f}원 (+{FEE_PCT:.2f}% — 거래세·수수료)<br>
+1R (1:1): {r1:,.0f}원 (gross +{(r1/price-1)*100:.1f}% / net +{r1_net_pct:.1f}%)<br>
+2R (2:1): {r2:,.0f}원 (gross +{(r2/price-1)*100:.1f}% / net +{r2_net_pct:.1f}%)<br>
+3R (3:1): {r3:,.0f}원 (gross +{(r3/price-1)*100:.1f}% / net +{r3_net_pct:.1f}%)
 </div>
 """, unsafe_allow_html=True)
+
+                # 손절폭 8% 초과 경고
+                if stop_pct > 8.0:
+                    st.markdown(f"""
+<div class="signal-none">
+주의 — 손절폭 {stop_pct:.1f}%가 8%를 초과<br>
+한국형 미너비니 기준상 매수 보류 권고. 변동성이 줄어든 다음 베이스 대기.
+</div>""", unsafe_allow_html=True)
             else:
                 st.caption("ATR 데이터 부족")
 

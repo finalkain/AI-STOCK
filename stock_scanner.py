@@ -177,6 +177,16 @@ SECTORS = {
 }
 
 
+# ── 한국형 미너비니 필터 임계값 ───────────────────
+KR_TURNOVER_MIN = 5_000_000_000     # 한국주 20일 평균 거래대금 ≥ 50억원
+US_TURNOVER_MIN = 10_000_000        # 미국주 ≥ $10M (소형주 가드)
+ATR_PCT_MAX = 6.0                   # ATR(20)/price ≤ 6%
+STOP_DISTANCE_MAX = 8.0             # 2×ATR 손절거리 ≤ 8%
+PIVOT_PROXIMITY_MAX = 2.0           # 돌파선 대비 ≤ 2% (피벗 근접)
+PIVOT_WATCH_MAX = 5.0               # 5% 이내는 관찰 등급
+GAP_WARN = 3.0                      # 갭상승 3% 이상은 추격 경고
+
+
 @dataclass
 class StockScore:
     ticker: str
@@ -190,32 +200,93 @@ class StockScore:
     rs: float
     atr20: float
     score: int
-    extended_pct: float = 0.0  # 돌파선 대비 현재가 괴리 (%)
+    extended_pct: float = 0.0       # 돌파선 대비 현재가 괴리 (%)
+    turnover_20d: float = 0.0       # 20일 평균 거래대금 (현지 통화)
+    atr_pct: float = 0.0            # ATR(20) / price * 100
+    stop_distance_pct: float = 0.0  # 2×ATR 손절 거리 %
+    gap_pct: float = 0.0            # 오늘 시가 vs 전일 종가 %
+    is_kr: bool = False             # 한국 종목 여부 (.KS / .KQ)
 
     @property
     def signal(self):
         parts = []
-        if self.breakout_55d: parts.append("55일��파")
+        if self.breakout_55d: parts.append("55일돌파")
         elif self.breakout_20d: parts.append("20일돌파")
         if self.stage2: parts.append("Stage2")
-        if self.volume_ratio >= 1.5: parts.append(f"거��량{self.volume_ratio:.1f}x")
+        if self.volume_ratio >= 1.5: parts.append(f"거래량{self.volume_ratio:.1f}x")
         return " · ".join(parts) if parts else "대기"
+
+    # ── 한국형 미너비니 필터 ──────────────────────
+    @property
+    def liquidity_ok(self):
+        """20일 평균 거래대금 충분 — 한국주 50억원, 미국주 $10M"""
+        threshold = KR_TURNOVER_MIN if self.is_kr else US_TURNOVER_MIN
+        return self.turnover_20d >= threshold
+
+    @property
+    def volatility_ok(self):
+        """ATR% ≤ 6% (변동성 수축 — VCP 본질)"""
+        return self.atr_pct <= ATR_PCT_MAX
+
+    @property
+    def stop_ok(self):
+        """2×ATR 손절거리 ≤ 8% (논리적 손절폭이 너무 넓지 않음)"""
+        return self.stop_distance_pct <= STOP_DISTANCE_MAX
+
+    @property
+    def position_ok(self):
+        """돌파선 대비 ≤ 2% (피벗 근접 매수)"""
+        return self.extended_pct <= PIVOT_PROXIMITY_MAX
+
+    @property
+    def gap_ok(self):
+        """갭상승 3% 미만 (장초반 추격 매수 회피)"""
+        return self.gap_pct < GAP_WARN
 
     @property
     def is_buy_timing(self):
         """
-        매수 적기 판별 — 절대 기준 (모두 충족해야 함)
-        1. Stage 2 정배열
-        2. 20일 또는 55일 저항선 돌파 중
-        3. 거래량 평균 이상 (1.2배+)
-        4. 돌파선에서 5% 이내 (확장 과다 ���님)
+        매수 적기 (A급) — 한국형 미너비니 모든 필터 통과
+        Stage2 + 돌파 + 거래량 + 피벗근접(≤2%) + 거래대금 + ATR% + 손절거리 + 갭
         """
         return (
             self.stage2
             and (self.breakout_20d or self.breakout_55d)
             and self.volume_ratio >= 1.2
-            and self.extended_pct <= 5.0
+            and self.position_ok
+            and self.liquidity_ok
+            and self.volatility_ok
+            and self.stop_ok
+            and self.gap_ok
         )
+
+    @property
+    def is_watch(self):
+        """
+        관찰 등급 (B급) — 매수 적기는 아니지만 후보로 모니터링할 가치
+        피벗 ≤ 5%까지 허용, 핵심 필터(거래대금·변동성·손절)는 충족해야 함
+        """
+        if self.is_buy_timing:
+            return False
+        return (
+            self.stage2
+            and (self.breakout_20d or self.breakout_55d)
+            and self.extended_pct <= PIVOT_WATCH_MAX
+            and self.liquidity_ok
+            and self.volatility_ok
+            and self.stop_ok
+        )
+
+    @property
+    def filter_status(self):
+        """필터 통과 상태를 한 줄로 — 디버깅·UI용"""
+        flags = []
+        flags.append("유" if self.liquidity_ok else "✕유")
+        flags.append("변" if self.volatility_ok else "✕변")
+        flags.append("손" if self.stop_ok else "✕손")
+        flags.append("피" if self.position_ok else "△피")
+        flags.append("갭" if self.gap_ok else "✕갭")
+        return " ".join(flags)
 
 
 @dataclass
@@ -237,10 +308,13 @@ def _score_stock(ticker, name):
         c = d["Close"].values.astype(float)
         h = d["High"].values.astype(float)
         l = d["Low"].values.astype(float)
+        o = d["Open"].values.astype(float)
         v = d["Volume"].values.astype(float)
 
         price = c[-1]
         if price <= 0: return None
+
+        is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
 
         ma50 = np.mean(c[-50:])
         ma150 = np.mean(c[-150:])
@@ -248,6 +322,8 @@ def _score_stock(ticker, name):
 
         atr_arr = calc_atr(h, l, c, 20)
         atr20 = atr_arr[-1] if not np.isnan(atr_arr[-1]) else 0
+        atr_pct = (atr20 / price * 100) if price > 0 else 0
+        stop_distance_pct = atr_pct * 2  # 2×ATR 손절 시 거리 %
 
         high52 = np.max(h[-252:]) if len(h) >= 252 else np.max(h)
         near_high = (high52 - price) / high52 * 100
@@ -255,6 +331,14 @@ def _score_stock(ticker, name):
         vol_avg = np.mean(v[-50:]) if len(v) >= 50 else np.mean(v)
         vol_recent = np.mean(v[-5:])
         vol_ratio = vol_recent / vol_avg if vol_avg > 0 else 0
+
+        # 20일 평균 거래대금 (close × volume) — 한국형 유동성 필터
+        recent20_close = c[-20:]
+        recent20_vol = v[-20:]
+        turnover_20d = float(np.mean(recent20_close * recent20_vol))
+
+        # 갭상승 (오늘 시가 vs 전일 종가)
+        gap_pct = ((o[-1] - c[-2]) / c[-2] * 100) if len(c) >= 2 and c[-2] > 0 else 0.0
 
         stage2 = price > ma50 > ma150 > ma200
 
@@ -282,6 +366,12 @@ def _score_stock(ticker, name):
         elif vol_ratio >= 1.2: score += 8
         if rs > 50: score += 15
         elif rs > 20: score += 8
+        # ── 한국형 미너비니 가중 ──
+        if atr_pct <= 4.0: score += 10       # 변동성 수축 보너스
+        elif atr_pct <= ATR_PCT_MAX: score += 5
+        if extended_pct <= PIVOT_PROXIMITY_MAX: score += 8  # 피벗 근접
+        elif extended_pct <= PIVOT_WATCH_MAX: score += 3
+        if is_kr and turnover_20d >= 10_000_000_000: score += 5  # 100억 이상
 
         return StockScore(
             ticker=ticker, name=name, price=price,
@@ -289,6 +379,11 @@ def _score_stock(ticker, name):
             near_high_pct=near_high, volume_ratio=vol_ratio,
             rs=rs, atr20=atr20, score=score,
             extended_pct=round(extended_pct, 1),
+            turnover_20d=turnover_20d,
+            atr_pct=round(atr_pct, 2),
+            stop_distance_pct=round(stop_distance_pct, 2),
+            gap_pct=round(gap_pct, 2),
+            is_kr=is_kr,
         )
     except:
         return None
