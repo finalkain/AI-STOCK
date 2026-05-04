@@ -1,18 +1,9 @@
 {
   "total_capital": 3085500,
-  "cash": 1310175,
+  "cash": 2709675,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
-    {
-      "asset": "TIGER구리실물",
-      "shares": 90,
-      "avg_price": 15186,
-      "current_value": 0,
-      "trailing_stop": 15506,
-      "entry_date": "2026-04-01",
-      "note": "펀더멘털 기반 매수"
-    },
     {
       "asset": "KODEX반도체",
       "shares": 3,
@@ -25,12 +16,29 @@
   ],
   "journal": [
     {
+      "date": "2026-04-01",
+      "action": "BUY",
+      "asset": "TIGER구리실물",
+      "shares": 90,
+      "price": 15186,
+      "reason": "펀더멘털 기반 매수 (추세추종 시스템 이전 진입)"
+    },
+    {
       "date": "2026-04-18",
       "action": "BUY",
       "asset": "KODEX반도체",
       "shares": 3,
       "price": 110595,
       "reason": "55일 돌파 + 체제 OK + RS 3위"
+    },
+    {
+      "date": "2026-05-04",
+      "action": "SELL ALL",
+      "asset": "TIGER구리실물",
+      "shares": 90,
+      "price": 15550,
+      "pnl": 32760,
+      "reason": "전량 매도"
     }
   ]
 }

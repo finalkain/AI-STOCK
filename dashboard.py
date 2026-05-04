@@ -673,8 +673,10 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                                 )
                                 st.rerun()
 
-        # ── 진입/애드업 계산기 + 매도 ──────────
-        calc_tab1, calc_tab2, calc_tab3 = st.tabs(["진입 계산기", "애드업 계산기", "매도"])
+        # ── 진입/애드업 계산기 + 매도 + 매매일지 ─
+        calc_tab1, calc_tab2, calc_tab3, calc_tab4 = st.tabs(
+            ["진입 계산기", "애드업 계산기", "매도", "매매일지"]
+        )
 
         with calc_tab1:
             st.markdown("##### 신규 진입 계산")
@@ -916,6 +918,98 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             f"손익 {pnl_amt:+,.0f}원"
                         )
                         st.rerun()
+
+        with calc_tab4:
+            st.markdown("##### 매매일지")
+            journal = pf.get("journal", [])
+            if not journal:
+                st.caption("기록된 매매가 없습니다.")
+            else:
+                rows = []
+                realized_pnl = 0
+                buys, sells = 0, 0
+                for e in journal:
+                    action = e.get("action", "-")
+                    if action.startswith("SELL"):
+                        sells += 1
+                        realized_pnl += int(e.get("pnl", 0) or 0)
+                    elif action in ("BUY", "ADD"):
+                        buys += 1
+                    pnl_v = e.get("pnl")
+                    rows.append({
+                        "날짜": e.get("date", "-"),
+                        "구분": action,
+                        "종목": e.get("asset", "-"),
+                        "수량": e.get("shares", 0),
+                        "단가(원)": f"{int(e.get('price', 0)):,}",
+                        "거래액(원)": f"{int(e.get('shares', 0)) * int(e.get('price', 0)):,}",
+                        "손익(원)": f"{int(pnl_v):+,}" if pnl_v is not None else "-",
+                        "사유": e.get("reason", "-"),
+                    })
+                st.dataframe(
+                    pd.DataFrame(rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(len(rows) * 38 + 40, 360),
+                )
+
+                stat_cols = st.columns(3)
+                stat_cols[0].metric("총 거래", f"{len(journal)}건")
+                stat_cols[1].metric("매수/매도", f"{buys} / {sells}")
+                stat_cols[2].metric(
+                    "실현손익", f"{realized_pnl:+,}원",
+                    delta_color="normal" if realized_pnl >= 0 else "inverse",
+                )
+
+                # ── TXT 매매일지 생성 ──
+                lines = []
+                lines.append("=" * 70)
+                lines.append("매매일지 (Trading Journal)")
+                lines.append(
+                    f"생성: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                lines.append(
+                    f"거래 {len(journal)}건 | 매수 {buys} / 매도 {sells} | "
+                    f"실현손익 {realized_pnl:+,}원"
+                )
+                lines.append("=" * 70)
+                lines.append("")
+                for e in journal:
+                    action = e.get("action", "-")
+                    shares = int(e.get("shares", 0))
+                    price = int(e.get("price", 0))
+                    amount = shares * price
+                    lines.append(f"[{e.get('date', '-')}] {action} {e.get('asset', '-')}")
+                    lines.append(f"  수량 : {shares}주")
+                    lines.append(f"  단가 : {price:,}원")
+                    lines.append(f"  거래액: {amount:,}원")
+                    if e.get("pnl") is not None:
+                        lines.append(f"  손익 : {int(e['pnl']):+,}원")
+                    lines.append(f"  사유 : {e.get('reason', '-')}")
+                    lines.append("")
+                lines.append("-" * 70)
+                lines.append("[현재 보유]")
+                if pf.get("positions"):
+                    for p in pf["positions"]:
+                        lines.append(
+                            f"  - {p['asset']}: {p.get('shares', 0)}주 × "
+                            f"평균 {p.get('avg_price', 0):,}원, "
+                            f"Stop {p.get('trailing_stop', 0):,}원 "
+                            f"(진입 {p.get('entry_date', '-')})"
+                        )
+                else:
+                    lines.append("  보유 종목 없음")
+                lines.append(f"  현금 : {pf.get('cash', 0):,}원")
+                lines.append("=" * 70)
+                txt_content = "\n".join(lines)
+
+                st.download_button(
+                    label="매매일지 TXT 다운로드",
+                    data=("﻿" + txt_content).encode("utf-8"),
+                    file_name=f"trade_journal_{datetime.now().strftime('%Y%m%d')}.txt",
+                    mime="text/plain",
+                    type="primary",
+                )
 
     st.divider()
 
