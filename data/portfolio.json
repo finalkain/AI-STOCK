@@ -1,17 +1,17 @@
 {
   "total_capital": 3085500,
-  "cash": 2709675,
+  "cash": 2583995,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
     {
       "asset": "KODEX반도체",
-      "shares": 3,
-      "avg_price": 110595,
+      "shares": 4,
+      "avg_price": 114366,
       "current_value": 0,
       "trailing_stop": 100653,
       "entry_date": "2026-04-18",
-      "note": "55일 돌파 신호 (시스템 첫 매수)"
+      "note": "55일 돌파 신호 (시스템 첫 매수, 4/30 1주 추가매수)"
     }
   ],
   "journal": [
@@ -30,6 +30,14 @@
       "shares": 3,
       "price": 110595,
       "reason": "55일 돌파 + 체제 OK + RS 3위"
+    },
+    {
+      "date": "2026-04-30",
+      "action": "ADD",
+      "asset": "KODEX반도체",
+      "shares": 1,
+      "price": 125680,
+      "reason": "추가매수 (백필)"
     },
     {
       "date": "2026-05-04",

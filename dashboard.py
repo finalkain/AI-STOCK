@@ -645,7 +645,17 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                     # 권장 Stop (보수적: 셋 중 높은 값)
                     apply_stop = max(new_stop, atr_stop, ts)
 
-                    if st.button("추가매수 적용", key=f"apply_add_{pos_key}", type="primary"):
+                    apply_cols = st.columns([1.2, 1])
+                    add_date_inline = apply_cols[0].date_input(
+                        "거래 날짜",
+                        value=datetime.now().date(),
+                        key=f"add_date_{pos_key}",
+                        help="과거 추가매수를 백필하려면 날짜를 변경하세요",
+                    )
+                    apply_cols[1].markdown("<br>", unsafe_allow_html=True)
+                    if apply_cols[1].button(
+                        "추가매수 적용", key=f"apply_add_{pos_key}", type="primary"
+                    ):
                         if add_cost > pf["cash"]:
                             st.error(f"현금 부족: 필요 {add_cost:,}원 / 보유 {pf['cash']:,}원")
                         else:
@@ -654,21 +664,27 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                             pos["trailing_stop"] = apply_stop
                             pos["current_value"] = int(price * new_total)
                             pf["cash"] -= add_cost
+                            trade_date = add_date_inline.strftime("%Y-%m-%d")
+                            is_backfill = add_date_inline != datetime.now().date()
                             pf["journal"].append({
-                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "date": trade_date,
                                 "action": "ADD",
                                 "asset": pos["asset"],
                                 "shares": add_shares,
                                 "price": add_price,
-                                "reason": "추가매수 (대시보드)",
+                                "reason": "추가매수 (백필)" if is_backfill else "추가매수 (대시보드)",
                             })
+                            pf["journal"].sort(key=lambda x: x.get("date", ""))
                             ok = save_portfolio(
                                 pf,
-                                commit_msg=f"ADD {pos['asset']} +{add_shares}주 @ {add_price:,}원",
+                                commit_msg=(
+                                    f"ADD {pos['asset']} +{add_shares}주 @ {add_price:,}원"
+                                    f" ({trade_date})"
+                                ),
                             )
                             if ok:
                                 st.success(
-                                    f"적용 완료: +{add_shares}주 @ {add_price:,}원 "
+                                    f"적용 완료 [{trade_date}]: +{add_shares}주 @ {add_price:,}원 "
                                     f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop:,}원"
                                 )
                                 st.rerun()
@@ -806,7 +822,17 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
 
                     apply_stop2 = max(rec_stop, cur_stop)
 
-                    if st.button("추가매수 적용", key="apply_addup_tab", type="primary"):
+                    apply_cols2 = st.columns([1.2, 1])
+                    addup_date = apply_cols2[0].date_input(
+                        "거래 날짜",
+                        value=datetime.now().date(),
+                        key="addup_date_tab",
+                        help="과거 추가매수를 백필하려면 날짜를 변경하세요",
+                    )
+                    apply_cols2[1].markdown("<br>", unsafe_allow_html=True)
+                    if apply_cols2[1].button(
+                        "추가매수 적용", key="apply_addup_tab", type="primary"
+                    ):
                         if add_cost > pf["cash"]:
                             st.error(f"현금 부족: 필요 {add_cost:,}원 / 보유 {pf['cash']:,}원")
                         else:
@@ -815,21 +841,27 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             addup_pos["trailing_stop"] = apply_stop2
                             addup_pos["current_value"] = int(cur_price * new_total)
                             pf["cash"] -= add_cost
+                            trade_date = addup_date.strftime("%Y-%m-%d")
+                            is_backfill = addup_date != datetime.now().date()
                             pf["journal"].append({
-                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "date": trade_date,
                                 "action": "ADD",
                                 "asset": addup_asset,
                                 "shares": add_qty,
                                 "price": add_price,
-                                "reason": "추가매수 (애드업 탭)",
+                                "reason": "추가매수 (백필)" if is_backfill else "추가매수 (애드업 탭)",
                             })
+                            pf["journal"].sort(key=lambda x: x.get("date", ""))
                             ok = save_portfolio(
                                 pf,
-                                commit_msg=f"ADD {addup_asset} +{add_qty}주 @ {add_price:,}원",
+                                commit_msg=(
+                                    f"ADD {addup_asset} +{add_qty}주 @ {add_price:,}원"
+                                    f" ({trade_date})"
+                                ),
                             )
                             if ok:
                                 st.success(
-                                    f"적용 완료: +{add_qty}주 @ {add_price:,}원 "
+                                    f"적용 완료 [{trade_date}]: +{add_qty}주 @ {add_price:,}원 "
                                     f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop2:,}원"
                                 )
                                 st.rerun()
@@ -885,17 +917,20 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
 적용 후 현금: {pf["cash"] + proceeds:,}원
 </div>""", unsafe_allow_html=True)
 
-                if st.button("매도 적용", key="apply_sell", type="primary"):
+                sell_apply_cols = st.columns([1.2, 1])
+                sell_date = sell_apply_cols[0].date_input(
+                    "거래 날짜",
+                    value=datetime.now().date(),
+                    key="sell_date",
+                    help="과거 매도를 백필하려면 날짜를 변경하세요",
+                )
+                sell_apply_cols[1].markdown("<br>", unsafe_allow_html=True)
+                if sell_apply_cols[1].button(
+                    "매도 적용", key="apply_sell", type="primary"
+                ):
                     pf["cash"] += proceeds
-                    pf["journal"].append({
-                        "date": datetime.now().strftime("%Y-%m-%d"),
-                        "action": "SELL",
-                        "asset": sell_asset,
-                        "shares": sell_qty,
-                        "price": sell_price,
-                        "pnl": int(pnl_amt),
-                        "reason": sell_reason or "매도",
-                    })
+                    trade_date = sell_date.strftime("%Y-%m-%d")
+                    is_backfill = sell_date != datetime.now().date()
                     if fully_close:
                         pf["positions"] = [
                             p for p in pf["positions"] if p["asset"] != sell_asset
@@ -905,16 +940,26 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                         sell_pos["shares"] = remain
                         sell_pos["current_value"] = int(ref_price * remain)
                         sell_kind = "SELL"
+                    pf["journal"].append({
+                        "date": trade_date,
+                        "action": sell_kind,
+                        "asset": sell_asset,
+                        "shares": sell_qty,
+                        "price": sell_price,
+                        "pnl": int(pnl_amt),
+                        "reason": (sell_reason or "매도") + (" (백필)" if is_backfill else ""),
+                    })
+                    pf["journal"].sort(key=lambda x: x.get("date", ""))
                     ok = save_portfolio(
                         pf,
                         commit_msg=(
                             f"{sell_kind} {sell_asset} {sell_qty}주 @ {sell_price:,}원 "
-                            f"(PnL {pnl_amt:+,.0f}원)"
+                            f"(PnL {pnl_amt:+,.0f}원, {trade_date})"
                         ),
                     )
                     if ok:
                         st.success(
-                            f"매도 적용: {sell_qty}주 @ {sell_price:,}원, "
+                            f"매도 적용 [{trade_date}]: {sell_qty}주 @ {sell_price:,}원, "
                             f"손익 {pnl_amt:+,.0f}원"
                         )
                         st.rerun()
