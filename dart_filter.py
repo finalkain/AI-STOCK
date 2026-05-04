@@ -11,12 +11,15 @@ DART Open API — 한국형 미너비니 펀더멘털·공시 필터
 - fund_<corp_code>.json, disc_<corp_code>.json — 24시간
 - API 키는 Streamlit Secrets `dart_api_key` 또는 환경변수에서 읽음
 """
+from __future__ import annotations
+
 import io
 import json
 import os
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 import xml.etree.ElementTree as ET
 
 import requests
@@ -284,7 +287,7 @@ def fundamentals_pass(fund: dict, allow_turnaround: bool = True) -> bool:
     return rev >= REV_YOY_MIN and op >= OP_YOY_MIN
 
 
-def evaluate(api_key: str, ticker: str, corp_code_map: dict | None = None) -> dict:
+def evaluate(api_key: str, ticker: str, corp_code_map: Optional[dict] = None) -> dict:
     """
     한 종목에 대해 펀더멘털 + 공시 리스크 종합.
     한국주(.KS/.KQ)가 아니거나 corp_code 매핑 실패 시 빈 결과 반환.

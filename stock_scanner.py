@@ -2,10 +2,13 @@
 섹터 → 대장주 스크리너 (미너비니 스타일)
 강세 섹터를 찾고, 그 안에서 추세가 가장 강한 종목을 추림
 """
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from dataclasses import dataclass, field
+from typing import Optional
 from backtest.turtle_system import calc_atr
 
 
@@ -207,12 +210,12 @@ class StockScore:
     gap_pct: float = 0.0            # 오늘 시가 vs 전일 종가 %
     is_kr: bool = False             # 한국 종목 여부 (.KS / .KQ)
     # ── DART 펀더멘털·공시 (한국주 한정) ──────────
-    dart_known: bool = False        # 데이터 확보 여부
-    rev_yoy: float | None = None    # 매출 YoY %
-    op_yoy: float | None = None     # 영업이익 YoY % (inf = 흑자전환)
-    is_loss: bool | None = None     # 현재 분기 적자 여부
-    fundamentals_pass: bool = True  # 매출·영익 임계 통과 (미확보 시 True)
-    disclosure_risk: bool = False   # 부정 공시 검출
+    dart_known: bool = False                    # 데이터 확보 여부
+    rev_yoy: Optional[float] = None             # 매출 YoY %
+    op_yoy: Optional[float] = None              # 영업이익 YoY % (inf = 흑자전환)
+    is_loss: Optional[bool] = None              # 현재 분기 적자 여부
+    fundamentals_pass: bool = True              # 매출·영익 임계 통과 (미확보 시 True)
+    disclosure_risk: bool = False               # 부정 공시 검출
     disclosure_matches: list = field(default_factory=list)
 
     @property
