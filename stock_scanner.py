@@ -206,6 +206,14 @@ class StockScore:
     stop_distance_pct: float = 0.0  # 2×ATR 손절 거리 %
     gap_pct: float = 0.0            # 오늘 시가 vs 전일 종가 %
     is_kr: bool = False             # 한국 종목 여부 (.KS / .KQ)
+    # ── DART 펀더멘털·공시 (한국주 한정) ──────────
+    dart_known: bool = False        # 데이터 확보 여부
+    rev_yoy: float | None = None    # 매출 YoY %
+    op_yoy: float | None = None     # 영업이익 YoY % (inf = 흑자전환)
+    is_loss: bool | None = None     # 현재 분기 적자 여부
+    fundamentals_pass: bool = True  # 매출·영익 임계 통과 (미확보 시 True)
+    disclosure_risk: bool = False   # 부정 공시 검출
+    disclosure_matches: list = field(default_factory=list)
 
     @property
     def signal(self):
@@ -244,10 +252,21 @@ class StockScore:
         return self.gap_pct < GAP_WARN
 
     @property
+    def fundamentals_ok(self):
+        """매출·영익 YoY 임계 통과 (DART 미사용 시 True 유지)"""
+        return self.fundamentals_pass
+
+    @property
+    def disclosure_ok(self):
+        """부정 공시 미검출 (DART 미사용 시 True 유지)"""
+        return not self.disclosure_risk
+
+    @property
     def is_buy_timing(self):
         """
         매수 적기 (A급) — 한국형 미너비니 모든 필터 통과
-        Stage2 + 돌파 + 거래량 + 피벗근접(≤2%) + 거래대금 + ATR% + 손절거리 + 갭
+        가격 8: Stage2 + 돌파 + 거래량 + 피벗(≤2%) + 거래대금 + ATR% + 손절거리 + 갭
+        DART 2: 펀더멘털 + 공시 (DART 미사용/미확보 시 자동 통과)
         """
         return (
             self.stage2
@@ -258,13 +277,15 @@ class StockScore:
             and self.volatility_ok
             and self.stop_ok
             and self.gap_ok
+            and self.fundamentals_ok
+            and self.disclosure_ok
         )
 
     @property
     def is_watch(self):
         """
         관찰 등급 (B급) — 매수 적기는 아니지만 후보로 모니터링할 가치
-        피벗 ≤ 5%까지 허용, 핵심 필터(거래대금·변동성·손절)는 충족해야 함
+        피벗 ≤ 5%까지 허용, 핵심 필터(거래대금·변동성·손절·공시)는 충족해야 함
         """
         if self.is_buy_timing:
             return False
@@ -275,6 +296,7 @@ class StockScore:
             and self.liquidity_ok
             and self.volatility_ok
             and self.stop_ok
+            and self.disclosure_ok  # 공시 리스크는 B급에서도 차단
         )
 
     @property
@@ -286,6 +308,9 @@ class StockScore:
         flags.append("손" if self.stop_ok else "✕손")
         flags.append("피" if self.position_ok else "△피")
         flags.append("갭" if self.gap_ok else "✕갭")
+        if self.dart_known:
+            flags.append("실" if self.fundamentals_ok else "✕실")
+            flags.append("공" if self.disclosure_ok else "✕공")
         return " ".join(flags)
 
 
@@ -297,7 +322,7 @@ class SectorResult:
     leaders: list = field(default_factory=list)  # list[StockScore]
 
 
-def _score_stock(ticker, name):
+def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
     try:
         d = yf.download(ticker, period="2y", progress=False)
         if d.empty or len(d) < 200:
@@ -373,6 +398,34 @@ def _score_stock(ticker, name):
         elif extended_pct <= PIVOT_WATCH_MAX: score += 3
         if is_kr and turnover_20d >= 10_000_000_000: score += 5  # 100억 이상
 
+        # ── DART 펀더멘털 + 공시 (한국주만) ──
+        dart_known = False
+        rev_yoy = None
+        op_yoy = None
+        is_loss = None
+        fundamentals_pass_v = True
+        disclosure_risk = False
+        disclosure_matches = []
+        if is_kr and dart_api_key:
+            try:
+                from dart_filter import evaluate as _dart_eval
+                ev = _dart_eval(dart_api_key, ticker, corp_code_map=corp_code_map)
+            except Exception:
+                ev = {"applicable": False}
+            if ev.get("applicable"):
+                dart_known = ev.get("fundamentals_known", False)
+                rev_yoy = ev.get("rev_yoy")
+                op_yoy = ev.get("op_yoy")
+                is_loss = ev.get("is_loss")
+                fundamentals_pass_v = ev.get("fundamentals_pass", True)
+                disclosure_risk = ev.get("disclosure_risk", False)
+                disclosure_matches = ev.get("disclosure_matches", []) or []
+                # 점수 가중: 실적 성장 보너스, 공시 리스크 감점
+                if dart_known and fundamentals_pass_v:
+                    score += 8
+                if disclosure_risk:
+                    score -= 30
+
         return StockScore(
             ticker=ticker, name=name, price=price,
             stage2=stage2, breakout_20d=brk20, breakout_55d=brk55,
@@ -384,8 +437,15 @@ def _score_stock(ticker, name):
             stop_distance_pct=round(stop_distance_pct, 2),
             gap_pct=round(gap_pct, 2),
             is_kr=is_kr,
+            dart_known=dart_known,
+            rev_yoy=rev_yoy,
+            op_yoy=op_yoy,
+            is_loss=is_loss,
+            fundamentals_pass=fundamentals_pass_v,
+            disclosure_risk=disclosure_risk,
+            disclosure_matches=disclosure_matches,
         )
-    except:
+    except Exception:
         return None
 
 
@@ -407,11 +467,28 @@ def _sector_rs(tickers_dict):
     return best if best > -999 else 0
 
 
-def scan_sectors(top_n=4, leaders_per_sector=3, progress_callback=None):
+def scan_sectors(top_n=4, leaders_per_sector=3, progress_callback=None,
+                 dart_api_key=None):
     """
     1. 전 섹터 RS 계산 → 상위 top_n개
     2. 상위 섹터의 개별 종목 스캔 → 대장주 leaders_per_sector개
+
+    dart_api_key 가 주어지면 한국 종목에 한해 DART 펀더멘털·공시 필터를 추가 적용.
     """
+    # DART corp_code 매핑은 한 번만 로드해 모든 종목에 재사용
+    corp_code_map = None
+    if dart_api_key:
+        try:
+            from dart_filter import load_corp_codes
+            if progress_callback:
+                progress_callback(0.01, "DART corp_code 로딩...")
+            corp_code_map = load_corp_codes(dart_api_key)
+        except Exception as e:
+            if progress_callback:
+                progress_callback(0.02, f"DART 매핑 실패: {e} — 펀더멘털 필터 비활성")
+            corp_code_map = None
+            dart_api_key = None  # 이후 호출 차단
+
     # Step 1: 섹터 RS 랭킹
     sector_scores = []
     total_sectors = len(SECTORS)
@@ -441,7 +518,11 @@ def scan_sectors(top_n=4, leaders_per_sector=3, progress_callback=None):
                     (total_sectors + stock_done) / (total_sectors + stock_total),
                     f"{sector_name}: {name}"
                 )
-            s = _score_stock(ticker, name)
+            s = _score_stock(
+                ticker, name,
+                dart_api_key=dart_api_key,
+                corp_code_map=corp_code_map,
+            )
             if s and s.score >= 30:
                 leaders.append(s)
 

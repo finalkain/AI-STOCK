@@ -435,7 +435,23 @@ def main():
     # ── 왼쪽: 강세 섹터 → 대장주 ────────────────
     with left:
         st.markdown("##### 강세 섹터 → 대장주")
-        run_sector_scan = st.button("섹터 스캔", type="primary")
+        scan_cols = st.columns([1, 1.2])
+        run_sector_scan = scan_cols[0].button("섹터 스캔", type="primary")
+        dart_key = st.secrets.get("dart_api_key", "")
+        use_dart = scan_cols[1].checkbox(
+            "DART 실적·공시 필터",
+            value=bool(dart_key),
+            disabled=not dart_key,
+            help="한국주에 매출/영업이익 YoY와 부정 공시 키워드 필터 추가 (Streamlit Secrets에 dart_api_key 등록 필요)",
+        )
+        if not dart_key:
+            with st.expander("DART API 키 설정 방법"):
+                st.markdown("""
+1. https://opendart.fss.or.kr 회원가입 → API 키 발급 (무료)
+2. Streamlit Cloud 앱 설정 → **Secrets** 메뉴
+3. `dart_api_key = "발급받은_키"` 추가 후 저장
+4. 앱 재시작 → 체크박스 활성화
+""")
 
         if run_sector_scan:
             from stock_scanner import scan_sectors
@@ -443,7 +459,9 @@ def main():
             def _progress(pct, msg):
                 progress.progress(min(pct, 1.0), text=msg)
             sector_results, all_sectors = scan_sectors(
-                top_n=4, leaders_per_sector=5, progress_callback=_progress
+                top_n=4, leaders_per_sector=5,
+                progress_callback=_progress,
+                dart_api_key=(dart_key if use_dart else None),
             )
             progress.empty()
             st.session_state["sector_results"] = sector_results
@@ -508,11 +526,26 @@ def main():
                     elif s.is_watch:
                         watch_list.append((sr.name, s))
 
+            def _fmt_fund(s):
+                """펀더멘털 한 줄 — DART 미사용/미확보 시 빈 문자열"""
+                if not s.dart_known:
+                    return ""
+                rev = f"{s.rev_yoy:+.1f}%" if s.rev_yoy is not None else "n/a"
+                if s.op_yoy == float("inf"):
+                    op = "흑자전환"
+                elif s.op_yoy is None:
+                    op = "n/a"
+                else:
+                    op = f"{s.op_yoy:+.1f}%"
+                loss = " · 적자" if s.is_loss else ""
+                return f"<small>실적 매출 {rev} / 영익 {op}{loss}</small><br>"
+
             if buy_ready:
                 st.markdown(f"""
 <div class="signal-buy">
 <b>매수 적기 (A급) — {len(buy_ready)}종목</b><br>
-<small>Stage2 + 돌파 + 거래량 + 피벗≤2% + 거래대금 + ATR%≤6% + 손절≤8% + 갭&lt;3%</small>
+<small>Stage2 + 돌파 + 거래량 + 피벗≤2% + 거래대금 + ATR%≤6% + 손절≤8% + 갭&lt;3%</small>{
+" + 실적·공시" if any(s.dart_known for _, s in buy_ready) else ""}
 </div>""", unsafe_allow_html=True)
                 for sector_name, s in buy_ready:
                     stop = s.price - 2 * s.atr20
@@ -524,14 +557,37 @@ def main():
 <div class="signal-hold">
 <b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
 현재가: {s.price:,.0f} | 손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>
-<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}%</small>
-</div>""", unsafe_allow_html=True)
+<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}%</small><br>
+{_fmt_fund(s)}</div>""", unsafe_allow_html=True)
             else:
                 st.markdown(f"""
 <div class="signal-none">
 <b>매수 적기 종목 없음</b><br>
 한국형 미너비니 8개 필터를 동시 만족하는 종목 없음.<br>
 <i>거래하지 않는 것도 포지션입니다.</i>
+</div>""", unsafe_allow_html=True)
+
+            # ── 공시 리스크 종목 (사용 시 노출) ───
+            risk_list = []
+            for sr in sector_results:
+                for s in sr.leaders:
+                    if s.disclosure_risk:
+                        risk_list.append((sr.name, s))
+            if risk_list:
+                st.markdown(f"""
+<div class="signal-none">
+<b>공시 리스크 — {len(risk_list)}종목 (매수 차단)</b>
+</div>""", unsafe_allow_html=True)
+                for sector_name, s in risk_list:
+                    matches = s.disclosure_matches[:3]
+                    bullets = "<br>".join(
+                        f"  · [{m.get('date','')}] {m.get('keyword','')}: {m.get('title','')[:60]}"
+                        for m in matches
+                    )
+                    st.markdown(f"""
+<div class="signal-none">
+<b>{s.name}</b> ({sector_name})<br>
+{bullets}
 </div>""", unsafe_allow_html=True)
 
             if watch_list:

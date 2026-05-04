@@ -9,3 +9,4 @@ strategy/
 test_login.py
 main.py
 .streamlit/secrets.toml
+data/dart_cache/
