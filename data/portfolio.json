@@ -2,14 +2,14 @@
   "total_capital": 3085500,
   "cash": 2583995,
   "margin_value": 1130400,
-  "risk_pct": 0.01,
+  "risk_pct": 0.005,
   "positions": [
     {
       "asset": "KODEX반도체",
       "shares": 4,
       "avg_price": 114366,
       "current_value": 0,
-      "trailing_stop": 100653,
+      "trailing_stop": 121077,
       "entry_date": "2026-04-18",
       "note": "55일 돌파 신호 (시스템 첫 매수, 4/30 1주 추가매수)"
     }
