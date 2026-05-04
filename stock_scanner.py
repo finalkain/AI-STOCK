@@ -180,14 +180,39 @@ SECTORS = {
 }
 
 
-# ── 한국형 미너비니 필터 임계값 ───────────────────
+# ── 공통 임계값 ────────────────────────────────
 KR_TURNOVER_MIN = 5_000_000_000     # 한국주 20일 평균 거래대금 ≥ 50억원
 US_TURNOVER_MIN = 10_000_000        # 미국주 ≥ $10M (소형주 가드)
-ATR_PCT_MAX = 6.0                   # ATR(20)/price ≤ 6%
-STOP_DISTANCE_MAX = 8.0             # 2×ATR 손절거리 ≤ 8%
-PIVOT_PROXIMITY_MAX = 2.0           # 돌파선 대비 ≤ 2% (피벗 근접)
-PIVOT_WATCH_MAX = 5.0               # 5% 이내는 관찰 등급
-GAP_WARN = 3.0                      # 갭상승 3% 이상은 추격 경고
+
+# ── A급 (strict, 매수 적기) 임계값 ────────────────
+A_GAP_MAX = 3.0                     # 갭 < 3%
+A_VOL_MIN = 1.3                     # 거래량 ≥ 1.3x
+A_PIVOT_MAX = 2.0                   # 피벗 +2% 이내
+A_ATR_MAX = 6.0                     # ATR ≤ 6%
+A_STOP_MAX = 8.0                    # 손절거리 ≤ 8%
+
+# ── B급 (relaxed, 관찰) 임계값 ────────────────────
+B_GAP_MAX = 5.0
+B_VOL_MIN = 0.8
+B_PIVOT_MAX = 5.0
+B_ATR_MAX = 8.0
+B_STOP_MAX = 10.0
+
+# ── B-급 (경고) 트리거 ────────────────────────────
+WARN_GAP_MIN = 3.0                  # 갭 > 3% AND
+WARN_VOL_MAX = 1.0                  # 거래량 < 1.0x → B- 경고
+
+# 호환 alias (기존 코드/UI 깨지지 않게)
+ATR_PCT_MAX = A_ATR_MAX
+STOP_DISTANCE_MAX = A_STOP_MAX
+PIVOT_PROXIMITY_MAX = A_PIVOT_MAX
+PIVOT_WATCH_MAX = B_PIVOT_MAX
+GAP_WARN = A_GAP_MAX
+
+# ── 다음날 후보 패턴 임계값 ───────────────────────
+NEXTDAY_RECENT_BREAKOUT_MAX = 3     # 최근 돌파 ≤ 3일
+NEXTDAY_PIVOT_PULLBACK_MAX = 1.5    # 피벗 +1.5% 이내 눌림
+NEXTDAY_CLOSE_STRENGTH_MIN = 0.5    # 일중 종가 강도 ≥ 0.5
 
 
 @dataclass
@@ -217,6 +242,10 @@ class StockScore:
     fundamentals_pass: bool = True              # 매출·영익 임계 통과 (미확보 시 True)
     disclosure_risk: bool = False               # 부정 공시 검출
     disclosure_matches: list = field(default_factory=list)
+    # ── 다음날 후보 / 분봉 패턴 ──────────────────
+    days_since_breakout: int = 999              # 마지막 55일 신고가 이후 경과일
+    close_strength: float = 0.5                 # (close - low)/(high - low) — 일중 종가 강도
+    gap_absorbed: bool = False                  # 갭상승 후 종가가 시가 아래 (흡수 패턴)
 
     @property
     def signal(self):
@@ -227,32 +256,12 @@ class StockScore:
         if self.volume_ratio >= 1.5: parts.append(f"거래량{self.volume_ratio:.1f}x")
         return " · ".join(parts) if parts else "대기"
 
-    # ── 한국형 미너비니 필터 ──────────────────────
+    # ── 공통 필터 (등급 무관) ────────────────────
     @property
     def liquidity_ok(self):
         """20일 평균 거래대금 충분 — 한국주 50억원, 미국주 $10M"""
         threshold = KR_TURNOVER_MIN if self.is_kr else US_TURNOVER_MIN
         return self.turnover_20d >= threshold
-
-    @property
-    def volatility_ok(self):
-        """ATR% ≤ 6% (변동성 수축 — VCP 본질)"""
-        return self.atr_pct <= ATR_PCT_MAX
-
-    @property
-    def stop_ok(self):
-        """2×ATR 손절거리 ≤ 8% (논리적 손절폭이 너무 넓지 않음)"""
-        return self.stop_distance_pct <= STOP_DISTANCE_MAX
-
-    @property
-    def position_ok(self):
-        """돌파선 대비 ≤ 2% (피벗 근접 매수)"""
-        return self.extended_pct <= PIVOT_PROXIMITY_MAX
-
-    @property
-    def gap_ok(self):
-        """갭상승 3% 미만 (장초반 추격 매수 회피)"""
-        return self.gap_pct < GAP_WARN
 
     @property
     def fundamentals_ok(self):
@@ -264,53 +273,152 @@ class StockScore:
         """부정 공시 미검출 (DART 미사용 시 True 유지)"""
         return not self.disclosure_risk
 
+    # ── A급 개별 필터 (UI 표시용) ───────────────
     @property
-    def is_buy_timing(self):
+    def volatility_ok(self):
+        return self.atr_pct <= A_ATR_MAX
+
+    @property
+    def stop_ok(self):
+        return self.stop_distance_pct <= A_STOP_MAX
+
+    @property
+    def position_ok(self):
+        return self.extended_pct <= A_PIVOT_MAX
+
+    @property
+    def gap_ok(self):
+        return self.gap_pct < A_GAP_MAX
+
+    @property
+    def volume_ok(self):
+        return self.volume_ratio >= A_VOL_MIN
+
+    # ── 등급 판정 (A / B / B- / None) ────────────
+    @property
+    def tier(self) -> Optional[str]:
         """
-        매수 적기 (A급) — 한국형 미너비니 모든 필터 통과
-        가격 8: Stage2 + 돌파 + 거래량 + 피벗(≤2%) + 거래대금 + ATR% + 손절거리 + 갭
-        DART 2: 펀더멘털 + 공시 (DART 미사용/미확보 시 자동 통과)
+        A : strict 매수 적기
+        B : relaxed 관찰
+        B-: 갭 + 거래량 동시 부족 경고
+        None: 후보 미달
         """
-        return (
+        # 공통 베이스 — 추세·돌파·유동성·공시
+        base = (
             self.stage2
             and (self.breakout_20d or self.breakout_55d)
-            and self.volume_ratio >= 1.2
-            and self.position_ok
             and self.liquidity_ok
-            and self.volatility_ok
-            and self.stop_ok
-            and self.gap_ok
-            and self.fundamentals_ok
             and self.disclosure_ok
         )
+        if not base:
+            return None
+
+        # B- 경고: 갭 > 3% AND 거래량 < 1.0x
+        is_warn = (self.gap_pct > WARN_GAP_MIN
+                   and self.volume_ratio < WARN_VOL_MAX)
+
+        a_pass = (
+            self.gap_pct <= A_GAP_MAX
+            and self.volume_ratio >= A_VOL_MIN
+            and self.extended_pct <= A_PIVOT_MAX
+            and self.atr_pct <= A_ATR_MAX
+            and self.stop_distance_pct <= A_STOP_MAX
+            and self.fundamentals_ok
+        )
+        b_pass = (
+            self.gap_pct <= B_GAP_MAX
+            and self.volume_ratio >= B_VOL_MIN
+            and self.extended_pct <= B_PIVOT_MAX
+            and self.atr_pct <= B_ATR_MAX
+            and self.stop_distance_pct <= B_STOP_MAX
+        )
+
+        if a_pass:
+            return "A"
+        if is_warn:
+            return "B-"
+        if b_pass:
+            return "B"
+        return None
+
+    @property
+    def is_buy_timing(self):
+        """A급 매수 적기"""
+        return self.tier == "A"
 
     @property
     def is_watch(self):
+        """B급 관찰"""
+        return self.tier == "B"
+
+    @property
+    def is_warning(self):
+        """B-급 경고 (갭 + 거래량 부족)"""
+        return self.tier == "B-"
+
+    # ── 다음날 매수 후보 ─────────────────────────
+    @property
+    def is_next_day_candidate(self):
         """
-        관찰 등급 (B급) — 매수 적기는 아니지만 후보로 모니터링할 가치
-        피벗 ≤ 5%까지 허용, 핵심 필터(거래대금·변동성·손절·공시)는 충족해야 함
+        장 마감 후 — 다음 거래일에 A급 승격 가능성이 높은 종목.
+        (이미 A급인 종목은 별도로 분류하지 않음)
+        패턴 1: 최근 3일 내 신고가 돌파 + 피벗 근접 눌림 + 종가 강함
+        패턴 2: 갭상승 3%↑ + 종가가 시가 아래(흡수) + 피벗 위
         """
-        if self.is_buy_timing:
+        if self.tier == "A":
             return False
-        return (
-            self.stage2
-            and (self.breakout_20d or self.breakout_55d)
-            and self.extended_pct <= PIVOT_WATCH_MAX
-            and self.liquidity_ok
-            and self.volatility_ok
-            and self.stop_ok
-            and self.disclosure_ok  # 공시 리스크는 B급에서도 차단
+        # 베이스 — 추세·유동성·변동성·공시 OK
+        if not (self.stage2
+                and self.liquidity_ok
+                and self.atr_pct <= B_ATR_MAX
+                and self.disclosure_ok):
+            return False
+
+        pattern_recent = (
+            self.days_since_breakout <= NEXTDAY_RECENT_BREAKOUT_MAX
+            and -1.0 <= self.extended_pct <= NEXTDAY_PIVOT_PULLBACK_MAX
+            and self.close_strength >= NEXTDAY_CLOSE_STRENGTH_MIN
         )
+        pattern_gap_absorbed = (
+            self.gap_pct >= A_GAP_MAX
+            and self.gap_absorbed
+            and -1.0 <= self.extended_pct <= 3.0
+        )
+        return pattern_recent or pattern_gap_absorbed
+
+    @property
+    def next_day_reason(self):
+        """다음날 후보로 잡힌 이유 (UI 노출용)"""
+        if not self.is_next_day_candidate:
+            return ""
+        reasons = []
+        if (self.days_since_breakout <= NEXTDAY_RECENT_BREAKOUT_MAX
+                and self.extended_pct <= NEXTDAY_PIVOT_PULLBACK_MAX
+                and self.close_strength >= NEXTDAY_CLOSE_STRENGTH_MIN):
+            label = "당일 돌파 + 피벗 머묾" if self.days_since_breakout == 0 else f"{self.days_since_breakout}일 전 돌파 후 피벗 눌림"
+            reasons.append(label)
+        if self.gap_pct >= A_GAP_MAX and self.gap_absorbed:
+            reasons.append(f"갭 +{self.gap_pct:.1f}% 흡수")
+        return " · ".join(reasons)
 
     @property
     def filter_status(self):
-        """필터 통과 상태를 한 줄로 — 디버깅·UI용"""
+        """필터 통과 상태를 한 줄로 — UI/디버깅용"""
         flags = []
         flags.append("유" if self.liquidity_ok else "✕유")
         flags.append("변" if self.volatility_ok else "✕변")
         flags.append("손" if self.stop_ok else "✕손")
-        flags.append("피" if self.position_ok else "△피")
-        flags.append("갭" if self.gap_ok else "✕갭")
+        flags.append("피" if self.position_ok
+                     else ("△피" if self.extended_pct <= B_PIVOT_MAX else "✕피"))
+        # 거래량 — A급(≥1.3) / B급(≥0.8) / 부족
+        if self.volume_ratio >= A_VOL_MIN:
+            flags.append("거")
+        elif self.volume_ratio >= B_VOL_MIN:
+            flags.append("△거")
+        else:
+            flags.append("✕거")
+        flags.append("갭" if self.gap_ok
+                     else ("△갭" if self.gap_pct <= B_GAP_MAX else "✕갭"))
         if self.dart_known:
             flags.append("실" if self.fundamentals_ok else "✕실")
             flags.append("공" if self.disclosure_ok else "✕공")
@@ -380,6 +488,25 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
         extended_pct = ((price - breakout_level) / breakout_level * 100
                         if breakout_level > 0 else 0)
 
+        # ── 다음날 후보 보조 지표 ─────────────────
+        # 1) 마지막 55일 신고가 이후 경과일
+        roll_high_55 = pd.Series(h).rolling(55).max().shift(1).values
+        days_since_breakout = 999
+        scan_back = min(22, len(c) - 56)
+        for j in range(len(c) - 1, max(54, len(c) - 1 - scan_back), -1):
+            ref = roll_high_55[j]
+            if not np.isnan(ref) and c[j] >= ref:
+                days_since_breakout = (len(c) - 1) - j
+                break
+
+        # 2) 일중 종가 강도: (종가 - 저가) / (고가 - 저가)
+        day_range = h[-1] - l[-1]
+        close_strength = float((c[-1] - l[-1]) / day_range) if day_range > 0 else 0.5
+
+        # 3) 갭상승 흡수: 갭 ≥ 3% AND 종가 ≤ 시가
+        gap_absorbed = (((o[-1] - c[-2]) / c[-2] * 100) >= A_GAP_MAX
+                        and c[-1] < o[-1]) if len(c) >= 2 and c[-2] > 0 else False
+
         r3m = (c[-1] / c[-63] - 1) * 2 if len(c) > 63 else 0
         r6m = (c[-63] / c[-126] - 1) if len(c) > 126 else 0
         rs = (r3m + r6m) * 100
@@ -447,6 +574,9 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
             fundamentals_pass=fundamentals_pass_v,
             disclosure_risk=disclosure_risk,
             disclosure_matches=disclosure_matches,
+            days_since_breakout=days_since_breakout,
+            close_strength=round(close_strength, 2),
+            gap_absorbed=gap_absorbed,
         )
     except Exception:
         return None

@@ -517,17 +517,32 @@ def main():
                     return f"${s.turnover_20d/1e6:.0f}M"
                 return f"${s.turnover_20d/1e3:.0f}K"
 
-            # ── 매수 적기 (A급) + 관찰 (B급) ─────
-            buy_ready, watch_list = [], []
+            # ── 등급별 분류: A / B / B- / 다음날 후보 ──
+            a_list, b_list, warn_list, nextday_list = [], [], [], []
             for sr in sector_results:
                 for s in sr.leaders:
-                    if s.is_buy_timing:
-                        buy_ready.append((sr.name, s))
-                    elif s.is_watch:
-                        watch_list.append((sr.name, s))
+                    if s.tier == "A":
+                        a_list.append((sr.name, s))
+                    elif s.tier == "B-":
+                        warn_list.append((sr.name, s))
+                    elif s.tier == "B":
+                        b_list.append((sr.name, s))
+                    if s.is_next_day_candidate:
+                        nextday_list.append((sr.name, s))
+
+            # ── KST 기반 시간대 인지 ───────────────
+            from datetime import timezone, timedelta as _td
+            kst_now = datetime.now(timezone(_td(hours=9)))
+            hour, minute = kst_now.hour, kst_now.minute
+            is_market_open = (9 <= hour < 15) or (hour == 15 and minute < 30)
+            is_after_close = (hour >= 16) or (hour == 15 and minute >= 30)
+            mode_label = (
+                "장중" if is_market_open
+                else ("장 마감 후" if is_after_close else "장 시작 전")
+            )
+            st.caption(f"현재 {kst_now.strftime('%H:%M')} KST — {mode_label} 모드")
 
             def _fmt_fund(s):
-                """펀더멘털 한 줄 — DART 미사용/미확보 시 빈 문자열"""
                 if not s.dart_known:
                     return ""
                 rev = f"{s.rev_yoy:+.1f}%" if s.rev_yoy is not None else "n/a"
@@ -540,31 +555,67 @@ def main():
                 loss = " · 적자" if s.is_loss else ""
                 return f"<small>실적 매출 {rev} / 영익 {op}{loss}</small><br>"
 
-            if buy_ready:
+            def _render_card(sector_name, s, show_qty=True):
+                stop = s.price - 2 * s.atr20
+                risk_ps = 2 * s.atr20
+                qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
+                brk = "55일돌파" if s.breakout_55d else ("20일돌파" if s.breakout_20d else "추세")
+                gap_str = f"{s.gap_pct:+.1f}%" if abs(s.gap_pct) >= 0.1 else "0%"
+                qty_line = (
+                    f"손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>"
+                    if show_qty else ""
+                )
+                return f"""<div class="signal-hold">
+<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
+현재가: {s.price:,.0f} | {qty_line}<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
+{_fmt_fund(s)}</div>"""
+
+            # ── A급: 매수 적기 ──────────────────
+            if a_list:
                 st.markdown(f"""
 <div class="signal-buy">
-<b>매수 적기 (A급) — {len(buy_ready)}종목</b><br>
-<small>Stage2 + 돌파 + 거래량 + 피벗≤2% + 거래대금 + ATR%≤6% + 손절≤8% + 갭&lt;3%</small>{
-" + 실적·공시" if any(s.dart_known for _, s in buy_ready) else ""}
+<b>A급 매수 적기 — {len(a_list)}종목</b><br>
+<small>strict: 갭&lt;3 · 거래량≥1.3 · 피벗≤2 · ATR≤6 · 손절≤8</small>
 </div>""", unsafe_allow_html=True)
-                for sector_name, s in buy_ready:
-                    stop = s.price - 2 * s.atr20
-                    risk_ps = 2 * s.atr20
-                    qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
-                    brk = "55일돌파" if s.breakout_55d else "20일돌파"
-                    gap_str = f"{s.gap_pct:+.1f}%" if abs(s.gap_pct) >= 0.1 else "0%"
-                    st.markdown(f"""
-<div class="signal-hold">
-<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
-현재가: {s.price:,.0f} | 손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>
-<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}%</small><br>
-{_fmt_fund(s)}</div>""", unsafe_allow_html=True)
+                for sector_name, s in a_list:
+                    st.markdown(_render_card(sector_name, s, show_qty=True),
+                                unsafe_allow_html=True)
             else:
                 st.markdown(f"""
 <div class="signal-none">
-<b>매수 적기 종목 없음</b><br>
-한국형 미너비니 8개 필터를 동시 만족하는 종목 없음.<br>
+<b>A급 매수 적기 없음</b><br>
+strict 필터 동시 만족 종목 없음.<br>
 <i>거래하지 않는 것도 포지션입니다.</i>
+</div>""", unsafe_allow_html=True)
+
+            # ── B-급: 갭 + 거래량 동시 부족 경고 ───
+            if warn_list:
+                st.markdown(f"""
+<div class="signal-none">
+<b>B-급 경고 — {len(warn_list)}종목 (갭 &gt;3% & 거래량 &lt;1.0x)</b><br>
+<small>가격은 좋지 않고 거래량 확인도 부족 — 추격 금지, 다음 베이스 대기</small>
+</div>""", unsafe_allow_html=True)
+                for sector_name, s in warn_list:
+                    st.markdown(_render_card(sector_name, s, show_qty=False),
+                                unsafe_allow_html=True)
+
+            # ── 다음날 후보 (장 마감 후 강조) ──────
+            if nextday_list:
+                emphasis = is_after_close or hour < 9
+                box_class = "signal-buy" if emphasis else "signal-hold"
+                st.markdown(f"""
+<div class="{box_class}">
+<b>{'★ ' if emphasis else ''}내일 매수 후보 — {len(nextday_list)}종목</b><br>
+<small>최근 돌파 후 피벗 눌림 / 갭상승 흡수 패턴 — 다음 거래일 재돌파 시 A급 승격 가능</small>
+</div>""", unsafe_allow_html=True)
+                for sector_name, s in nextday_list:
+                    reason = s.next_day_reason or "패턴 매칭"
+                    stop = s.price - 2 * s.atr20
+                    st.markdown(f"""
+<div class="signal-hold">
+<b>{s.name}</b> ({sector_name}) — {reason}<br>
+현재가: {s.price:,.0f} | 피벗+{s.extended_pct:+.1f}% · 종가강도 {s.close_strength:.2f} · 거래량 {s.volume_ratio:.1f}x<br>
+<small>참고 손절: {stop:,.0f} | ATR {s.atr_pct:.1f}% · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             # ── 공시 리스크 종목 (사용 시 노출) ───
@@ -590,14 +641,14 @@ def main():
 {bullets}
 </div>""", unsafe_allow_html=True)
 
-            if watch_list:
-                with st.expander(f"관찰 등급 (B급) — {len(watch_list)}종목 (피벗 ≤5%)"):
-                    for sector_name, s in watch_list:
+            if b_list:
+                with st.expander(f"B급 관찰 — {len(b_list)}종목 (relaxed: 갭≤5 · 거래량≥0.8 · 피벗≤5 · ATR≤8)"):
+                    for sector_name, s in b_list:
                         brk = "55일돌파" if s.breakout_55d else "20일돌파" if s.breakout_20d else "추세"
                         st.markdown(f"""
 <div class="signal-none">
-<b>{s.name}</b> ({sector_name}) — {brk} · 피벗+{s.extended_pct:.1f}%<br>
-<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}%</small>
+<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}%<br>
+<small>현재가 {s.price:,.0f} · 피벗+{s.extended_pct:.1f}% · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}% · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             st.markdown("---")
