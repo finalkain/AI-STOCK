@@ -429,6 +429,60 @@ def main():
 
     st.divider()
 
+    # ── 시장 국면 판정 (한국 + 미국) ──────────────
+    from macro_data import get_market_regime, get_defense_signals, REGIME_ALLOCATION
+
+    regime_data = get_market_regime()
+    if regime_data:
+        overall = regime_data["overall"]
+        alloc = regime_data["action"]
+
+        # 국면별 스타일
+        regime_style = {
+            "강세장": "signal-hold",
+            "약한 하락": "signal-none",
+            "명확한 하락": "signal-buy",
+            "과매도": "signal-buy",
+        }
+
+        st.markdown(f"""
+<div class="{regime_style.get(overall, 'signal-none')}" style="text-align:center">
+<span style="font-size:1.5em"><b>시장 국면: {overall}</b></span><br>
+{'' if overall == '강세장' else '현금 ' + alloc.get('현금','') + ' | ' if alloc else ''}{'롱 ' + alloc.get('롱','') if alloc else ''}
+{(' | 인버스 ' + alloc.get('인버스','')) if alloc.get('인버스','0%') != '0%' else ''}
+{(' | 달러 ' + alloc.get('달러','')) if alloc.get('달러','0%') != '0%' else ''}
+</div>""", unsafe_allow_html=True)
+
+        # 4개 지수 상세
+        idx_cols = st.columns(len(regime_data["indices"]))
+        for i, (idx_name, idx_info) in enumerate(regime_data["indices"].items()):
+            d = idx_info["data"]
+            with idx_cols[i]:
+                above50 = "▲" if d["above_50"] else "▼"
+                ma50dir = "↑" if d["ma50_rising"] else "↓"
+                st.markdown(f"""
+<div class="signal-hold">
+<b>{idx_name}</b> {idx_info['regime']}<br>
+{d['price']:,.0f} | 50일선{above50} {ma50dir}<br>
+<small>MA50 {d['ma50']:,.0f} | MA200 {d['ma200']:,.0f}</small>
+</div>""", unsafe_allow_html=True)
+
+        # 약세장이면 방어 자산 표시
+        if overall in ("명확한 하락", "과매도", "약한 하락"):
+            defense = get_defense_signals()
+            if defense:
+                st.markdown("**방어 자산 후보**")
+                def_cols = st.columns(len(defense))
+                for i, (dname, dsig) in enumerate(defense.items()):
+                    with def_cols[i]:
+                        st.markdown(f"""
+<div class="signal-hold">
+<b>{dname}</b><br>
+{dsig['price']:,.0f}원 | {dsig['signal']}
+</div>""", unsafe_allow_html=True)
+
+    st.divider()
+
     # ── 2열 레이아웃: 섹터→대장주 | 보유+계산기 ────
     left, right = st.columns([1.5, 1])
 

@@ -200,6 +200,171 @@ def get_market_sentiment():
 
 
 # ═══════════════════════════════════════════════════
+#  시장 국면 판정 (한국 + 미국)
+# ═══════════════════════════════════════════════════
+
+def _judge_market(closes, highs, lows):
+    """단일 지수의 국면 판정 데이터"""
+    if len(closes) < 200:
+        return None
+    price = closes[-1]
+    ma20 = np.mean(closes[-20:])
+    ma50 = np.mean(closes[-50:])
+    ma200 = np.mean(closes[-200:])
+
+    # 50일선 방향 (20일 전 대비)
+    ma50_prev = np.mean(closes[-70:-20])
+    ma50_rising = ma50 > ma50_prev
+
+    # 20일선 vs 50일선
+    ma20_above_50 = ma20 > ma50
+
+    above_50 = price > ma50
+    above_200 = price > ma200
+
+    # 신고가/신저가 (20일)
+    high_20 = np.max(highs[-20:])
+    low_20 = np.min(lows[-20:])
+    at_high = price >= high_20 * 0.98
+    at_low = price <= low_20 * 1.02
+
+    return {
+        "price": round(price, 2),
+        "ma20": round(ma20, 2),
+        "ma50": round(ma50, 2),
+        "ma200": round(ma200, 2),
+        "above_50": above_50,
+        "above_200": above_200,
+        "ma50_rising": ma50_rising,
+        "ma20_above_50": ma20_above_50,
+        "at_high": at_high,
+        "at_low": at_low,
+    }
+
+
+def _classify_regime(data):
+    """4단계 국면 분류"""
+    if data is None:
+        return "판정불가", "데이터 부족"
+
+    bullish_count = sum([
+        data["above_50"],
+        data["above_200"],
+        data["ma50_rising"],
+        data["ma20_above_50"],
+    ])
+
+    if bullish_count >= 3 and data["ma50_rising"]:
+        return "강세장", "롱 적극"
+    elif bullish_count >= 2:
+        return "약한 하락", "현금 확대, 관찰"
+    elif data["at_low"]:
+        return "과매도", "대기, 인버스 신규매수 금지"
+    else:
+        return "명확한 하락", "방어 모드 (인버스/달러)"
+
+
+REGIME_ALLOCATION = {
+    "강세장":    {"현금": "20~40%", "롱": "60~80%", "인버스": "0%", "달러": "0%"},
+    "약한 하락":  {"현금": "60~80%", "롱": "20~40% (관찰)", "인버스": "0~소액", "달러": "0%"},
+    "명확한 하락": {"현금": "50~70%", "롱": "0% (관찰만)", "인버스": "10~30%", "달러": "10~20%"},
+    "과매도":    {"현금": "70~90%", "롱": "0%", "인버스": "축소", "달러": "유지"},
+}
+
+
+def get_market_regime():
+    """한국(KOSPI/KOSDAQ) + 미국(S&P500/NASDAQ) 시장 국면 판정"""
+    indices = {
+        "KOSPI": "^KS11",
+        "KOSDAQ": "^KQ11",
+        "S&P500": "^GSPC",
+        "NASDAQ": "^IXIC",
+    }
+
+    results = {}
+    for name, ticker in indices.items():
+        try:
+            d = yf.download(ticker, period="2y", progress=False)
+            if isinstance(d.columns, pd.MultiIndex):
+                d.columns = d.columns.get_level_values(0)
+            if d.empty or len(d) < 200:
+                continue
+            c = d["Close"].values.astype(float)
+            h = d["High"].values.astype(float)
+            l = d["Low"].values.astype(float)
+            data = _judge_market(c, h, l)
+            regime, action = _classify_regime(data)
+            results[name] = {
+                "regime": regime,
+                "action": action,
+                "data": data,
+            }
+        except Exception:
+            continue
+
+    if not results:
+        return None
+
+    # 종합 판정: 4개 지수 중 가장 약한 쪽 기준
+    regime_order = ["과매도", "명확한 하락", "약한 하락", "강세장"]
+    worst = "강세장"
+    for r in results.values():
+        if regime_order.index(r["regime"]) < regime_order.index(worst):
+            worst = r["regime"]
+
+    _, overall_action = _classify_regime(None) if worst == "판정불가" else (worst, REGIME_ALLOCATION.get(worst, {}))
+
+    return {
+        "indices": results,
+        "overall": worst,
+        "action": REGIME_ALLOCATION.get(worst, {}),
+    }
+
+
+# ── 방어 자산 (인버스/달러 ETF) ──────────────────
+
+DEFENSE_ASSETS = {
+    "KODEX 인버스": "114800.KS",
+    "KODEX 코스닥150인버스": "251340.KS",
+    "KODEX 미국달러선물": "261240.KS",
+    "TIGER 미국달러단기채권액티브": "329750.KS",
+}
+
+
+def get_defense_signals():
+    """인버스/달러 ETF의 추세 상태"""
+    signals = {}
+    for name, ticker in DEFENSE_ASSETS.items():
+        try:
+            d = yf.download(ticker, period="1y", progress=False)
+            if isinstance(d.columns, pd.MultiIndex):
+                d.columns = d.columns.get_level_values(0)
+            if d.empty or len(d) < 50:
+                continue
+            c = d["Close"].values.astype(float)
+            h = d["High"].values.astype(float)
+
+            price = c[-1]
+            ma20 = np.mean(c[-20:])
+            ma50 = np.mean(c[-50:])
+            high20 = np.max(h[-20:])
+            brk20 = price >= high20
+
+            trend = "상승" if price > ma20 > ma50 else ("횡보" if price > ma50 else "하락")
+
+            signals[name] = {
+                "price": round(price, 0),
+                "trend": trend,
+                "above_ma20": price > ma20,
+                "breakout_20d": brk20,
+                "signal": f"{'✅ 20일돌파' if brk20 else ''} {trend}".strip(),
+            }
+        except Exception:
+            continue
+    return signals
+
+
+# ═══════════════════════════════════════════════════
 #  VIX 역사적 백분위
 # ═══════════════════════════════════════════════════
 
