@@ -913,9 +913,9 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                                 )
                                 st.rerun()
 
-        # ── 진입/애드업 계산기 + 매도 + 매매일지 ─
+        # ── 진입/애드업 계산기 + 매수·매도 + 매매일지 ─
         calc_tab1, calc_tab2, calc_tab3, calc_tab4 = st.tabs(
-            ["진입 계산기", "애드업 계산기", "매도", "매매일지"]
+            ["진입 계산기", "애드업 계산기", "매수/매도", "매매일지"]
         )
 
         with calc_tab1:
@@ -989,20 +989,102 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                 st.caption("ATR 데이터 부족")
 
         with calc_tab2:
-            st.markdown("##### 애드업 (추가매수) — 리스크 비례")
+            st.markdown("##### 매수 (신규 / 애드업) — 리스크 비례")
             held_positions = [p for p in pf["positions"] if p["shares"] > 0]
-            if not held_positions:
-                st.caption("보유 종목 없음")
-            else:
-                addup_asset = st.selectbox(
-                    "종목", [p["asset"] for p in held_positions], key="addup_asset"
-                )
-                addup_pos = next(p for p in held_positions if p["asset"] == addup_asset)
-                addup_r = next((r for r in results if r["name"] == addup_asset), None)
+            held_names = {p["asset"] for p in held_positions}
 
-                if addup_r:
-                    cur_price = addup_r["price"]
-                    cur_atr = addup_r["atr20"]
+            # 신규 매수 후보 — 두 출처 통합:
+            # (1) 섹터 스캐너 leaders 중 tier in (A, B) — 개별 종목(한미반도체 등) 풀
+            # (2) ALL_ASSETS 자체 분석(results) 휴리스틱 A/B — ETF·지수 포함
+            sector_results_local = st.session_state.get("sector_results", [])
+            new_candidates = []  # list[dict]
+            seen = set(held_names)
+
+            for sr in sector_results_local:
+                for s in sr.leaders:
+                    if s.name in seen or s.tier not in ("A", "B"):
+                        continue
+                    new_candidates.append({
+                        "name": s.name,
+                        "ticker": s.ticker,
+                        "price": s.price,
+                        "atr20": s.atr20,
+                        "tier": s.tier,
+                        "signal": s.signal,
+                        "alignment": "정배열" if s.stage2 else "혼조",
+                        "regime": s.stage2,
+                        "sector": sr.name,
+                        "source": "scanner",
+                    })
+                    seen.add(s.name)
+
+            for r in results:
+                if r["name"] in seen or not r["regime"]:
+                    continue
+                if r["s2"] and r["alignment"] == "정배열":
+                    t = "A"
+                elif r["s1"] and r["alignment"] in ("정배열", "혼조"):
+                    t = "B"
+                else:
+                    continue
+                new_candidates.append({
+                    "name": r["name"],
+                    "ticker": None,
+                    "price": r["price"],
+                    "atr20": r["atr20"],
+                    "tier": t,
+                    "signal": r["signal"],
+                    "alignment": r["alignment"],
+                    "regime": r["regime"],
+                    "sector": None,
+                    "source": "auto",
+                })
+                seen.add(r["name"])
+
+            # selectbox 옵션 (보유 → 신규 A → 신규 B)
+            options = []
+            label_to_key = {}  # label → (kind, asset_name, tier)
+            for p in held_positions:
+                lab = f"[보유] {p['asset']}"
+                options.append(lab)
+                label_to_key[lab] = ("held", p["asset"], None)
+            for want_tier in ("A", "B"):
+                for c in new_candidates:
+                    if c["tier"] != want_tier:
+                        continue
+                    suffix = f" · {c['sector']}" if c.get("sector") else ""
+                    lab = f"[신규·{c['tier']}] {c['name']}{suffix}"
+                    options.append(lab)
+                    label_to_key[lab] = ("new", c["name"], c["tier"])
+
+            if not options:
+                st.caption("보유 종목·신규 매수 후보 없음")
+                if not sector_results_local:
+                    st.caption("팁: 위쪽 '섹터 스캔 실행'을 먼저 돌리면 개별 종목 후보가 채워집니다")
+            else:
+                sel = st.selectbox("종목", options, key="addup_asset")
+                kind, asset_name, tier = label_to_key[sel]
+
+                sel_r = None
+                sel_c = None
+                if kind == "held":
+                    sel_r = next((r for r in results if r["name"] == asset_name), None)
+                    if not sel_r:
+                        st.caption("선택 종목 데이터 없음")
+                else:
+                    sel_c = next((c for c in new_candidates if c["name"] == asset_name), None)
+                    if not sel_c:
+                        st.caption("신규 후보 데이터 없음")
+
+                if kind == "held" and sel_r is None:
+                    pass
+                elif kind == "new" and sel_c is None:
+                    pass
+                elif kind == "held":
+                    # ── 애드업 (보유 종목 추가매수) ─────────
+                    addup_pos = next(p for p in held_positions if p["asset"] == asset_name)
+                    cur_price = sel_r["price"]
+                    cur_atr = sel_r["atr20"]
                     avg = addup_pos["avg_price"]
                     shares_held = addup_pos["shares"]
                     cur_stop = addup_pos.get("trailing_stop", 0)
@@ -1010,7 +1092,7 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
 
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{addup_asset}</b> | 현재가: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%)<br>
+<b>{asset_name}</b> | 현재가: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%)<br>
 보유: {shares_held}주 × 평균 {avg:,}원 | Stop: {cur_stop:,}원
 </div>""", unsafe_allow_html=True)
 
@@ -1023,15 +1105,10 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                     new_avg = int((avg * shares_held + add_price * add_qty) / new_total)
                     add_cost = add_price * add_qty
 
-                    # 같은 리스크 유지 Stop
                     max_risk = int(total * pf["risk_pct"])
                     risk_stop = int(new_avg - (max_risk / new_total))
                     risk_stop_pct = (new_avg - risk_stop) / new_avg * 100 if new_avg > 0 else 0
-
-                    # ATR 기반 Stop (참고)
                     atr_stop = int(cur_price - 2 * cur_atr)
-
-                    # 추천 Stop (둘 중 높은 것 = 더 보수적)
                     rec_stop = max(risk_stop, atr_stop)
 
                     st.markdown(f"""
@@ -1051,7 +1128,6 @@ ATR 기반 (2×ATR): {atr_stop:,}원<br>
 최대 손실: {max_risk:,}원
 </div>""", unsafe_allow_html=True)
 
-                    # Stop 변동 경고
                     if rec_stop > cur_stop:
                         st.markdown(f"""
 <div class="signal-hold">
@@ -1090,7 +1166,7 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             pf["journal"].append({
                                 "date": trade_date,
                                 "action": "ADD",
-                                "asset": addup_asset,
+                                "asset": asset_name,
                                 "shares": add_qty,
                                 "price": add_price,
                                 "reason": "추가매수 (백필)" if is_backfill else "추가매수 (애드업 탭)",
@@ -1099,7 +1175,7 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             ok = save_portfolio(
                                 pf,
                                 commit_msg=(
-                                    f"ADD {addup_asset} +{add_qty}주 @ {add_price:,}원"
+                                    f"ADD {asset_name} +{add_qty}주 @ {add_price:,}원"
                                     f" ({trade_date})"
                                 ),
                             )
@@ -1109,50 +1185,357 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                                     f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop2:,}원"
                                 )
                                 st.rerun()
+                else:
+                    # ── 신규 매수 (A/B급 후보) ──────────────
+                    cur_price = sel_c["price"]
+                    cur_atr = sel_c["atr20"]
+                    src_label = "섹터스캐너" if sel_c["source"] == "scanner" else "자체분석"
+                    sector_label = f" · {sel_c['sector']}" if sel_c.get("sector") else ""
+
+                    st.markdown(f"""
+<div class="signal-hold">
+<b>{asset_name}</b> [{tier}급]{sector_label} | 현재가: {cur_price:,.0f}원 | ATR: {cur_atr:,.0f}<br>
+{sel_c['alignment']} | 체제 {'OK' if sel_c['regime'] else 'X'} | {sel_c['signal']} <small>({src_label})</small>
+</div>""", unsafe_allow_html=True)
+
+                    st.markdown("---")
+                    # ATR 기반 자동 산출 (참고용)
+                    risk_per_share_auto = 2 * cur_atr if cur_atr > 0 else 0
+                    auto_qty = int(risk_amt / risk_per_share_auto) if risk_per_share_auto > 0 else 0
+                    auto_stop = int(cur_price - 2 * cur_atr) if cur_atr > 0 else int(cur_price * 0.92)
+
+                    new_qty = st.number_input(
+                        "매수 수량 (주)", 1, 100000,
+                        max(auto_qty, 1), key="new_qty"
+                    )
+                    new_price = st.number_input(
+                        "매수 예정가 (원)", 1, 99999999,
+                        int(cur_price), key="new_price"
+                    )
+                    new_stop = st.number_input(
+                        "손절가 (원)", 1, 99999999,
+                        max(auto_stop, 1), key="new_stop"
+                    )
+
+                    new_cost = new_qty * new_price
+                    risk_ps_actual = new_price - new_stop
+                    max_loss = risk_ps_actual * new_qty
+                    stop_pct = risk_ps_actual / new_price * 100 if new_price > 0 else 0
+                    affordable = "OK" if new_cost <= pf["cash"] else "X 부족"
+
+                    st.markdown(f"""
+<div class="signal-buy">
+<b>신규 매수 계획</b><br>
+수량: <b>{new_qty}주</b> × {new_price:,}원 = <b>{new_cost:,}원</b><br>
+손절: {new_stop:,}원 (-{stop_pct:.1f}%)<br>
+주당 리스크: {risk_ps_actual:,}원 | 최대 손실: <b>{max_loss:,}원</b><br>
+현금: {affordable} ({pf['cash']:,}원)
+</div>""", unsafe_allow_html=True)
+
+                    if auto_qty > 0 and (new_qty > auto_qty * 1.2 or new_qty < auto_qty * 0.8):
+                        st.markdown(f"""
+<div class="signal-none">
+권장 수량(자동 산출): {auto_qty}주 — 리스크 {pf['risk_pct']*100:.1f}% / ATR 2배 손절 기준
+</div>""", unsafe_allow_html=True)
+                    if stop_pct > 8.0:
+                        st.markdown(f"""
+<div class="signal-none">
+주의 — 손절폭 {stop_pct:.1f}%가 8%를 초과. 변동성 수축 후 재진입 권장.
+</div>""", unsafe_allow_html=True)
+
+                    apply_cols_new = st.columns([1.2, 1])
+                    new_date = apply_cols_new[0].date_input(
+                        "거래 날짜",
+                        value=datetime.now().date(),
+                        key="new_date",
+                        help="과거 매수를 백필하려면 날짜를 변경하세요",
+                    )
+                    apply_cols_new[1].markdown("<br>", unsafe_allow_html=True)
+                    if apply_cols_new[1].button(
+                        "신규 매수 적용", key="apply_new_buy", type="primary"
+                    ):
+                        if new_cost > pf["cash"]:
+                            st.error(f"현금 부족: 필요 {new_cost:,}원 / 보유 {pf['cash']:,}원")
+                        elif new_stop >= new_price:
+                            st.error(f"손절가({new_stop:,})가 매수가({new_price:,}) 이상 — 손절선은 매수가 아래여야 합니다")
+                        else:
+                            trade_date = new_date.strftime("%Y-%m-%d")
+                            is_backfill = new_date != datetime.now().date()
+                            existing = next(
+                                (p for p in pf["positions"] if p["asset"] == asset_name),
+                                None,
+                            )
+                            if existing:
+                                existing["shares"] = new_qty
+                                existing["avg_price"] = new_price
+                                existing["trailing_stop"] = new_stop
+                                existing["current_value"] = int(cur_price * new_qty)
+                                existing["entry_date"] = trade_date
+                                existing["note"] = f"신규 매수 ({tier}급)"
+                            else:
+                                pf["positions"].append({
+                                    "asset": asset_name,
+                                    "shares": new_qty,
+                                    "avg_price": new_price,
+                                    "current_value": int(cur_price * new_qty),
+                                    "trailing_stop": new_stop,
+                                    "entry_date": trade_date,
+                                    "note": f"신규 매수 ({tier}급)",
+                                })
+                            pf["cash"] -= new_cost
+                            pf["journal"].append({
+                                "date": trade_date,
+                                "action": "BUY",
+                                "asset": asset_name,
+                                "shares": new_qty,
+                                "price": new_price,
+                                "reason": (
+                                    f"신규 매수 ({tier}급, 백필)" if is_backfill
+                                    else f"신규 매수 ({tier}급, 애드업 탭)"
+                                ),
+                            })
+                            pf["journal"].sort(key=lambda x: x.get("date", ""))
+                            ok = save_portfolio(
+                                pf,
+                                commit_msg=(
+                                    f"BUY {asset_name} {new_qty}주 @ {new_price:,}원"
+                                    f" ({tier}급, {trade_date})"
+                                ),
+                            )
+                            if ok:
+                                st.success(
+                                    f"신규 매수 완료 [{trade_date}]: {new_qty}주 @ {new_price:,}원, "
+                                    f"Stop {new_stop:,}원"
+                                )
+                                st.rerun()
 
         with calc_tab3:
-            st.markdown("##### 매도 적용")
-            sellable = [p for p in pf["positions"] if p["shares"] > 0]
-            if not sellable:
-                st.caption("보유 종목 없음")
-            else:
-                sell_asset = st.selectbox(
-                    "종목", [p["asset"] for p in sellable], key="sell_asset"
-                )
-                sell_pos = next(p for p in sellable if p["asset"] == sell_asset)
-                sell_r = next((r for r in results if r["name"] == sell_asset), None)
-                ref_price = int(sell_r["price"]) if sell_r else int(sell_pos["avg_price"])
-                held_qty = sell_pos["shares"]
-                avg_buy = sell_pos["avg_price"]
+            trade_mode = st.radio(
+                "동작", ["매수", "매도"], horizontal=True, key="trade_mode_t3"
+            )
 
-                st.markdown(f"""
+            if trade_mode == "매수":
+                st.markdown("##### 매수 적용 (진입 계산기 종목 전체)")
+                if not results:
+                    st.caption("종목 데이터 없음")
+                else:
+                    buy_asset = st.selectbox(
+                        "종목", [r["name"] for r in results], key="buy_asset_t3"
+                    )
+                    buy_r = next(r for r in results if r["name"] == buy_asset)
+                    cur_price = buy_r["price"]
+                    cur_atr = buy_r["atr20"]
+
+                    existing = next(
+                        (p for p in pf["positions"] if p["asset"] == buy_asset), None
+                    )
+                    is_held = existing is not None and existing["shares"] > 0
+
+                    if is_held:
+                        avg = existing["avg_price"]
+                        shares_held = existing["shares"]
+                        cur_stop = existing.get("trailing_stop", 0)
+                        cur_pnl_pct = (cur_price - avg) / avg * 100 if avg > 0 else 0
+                        st.markdown(f"""
+<div class="signal-hold">
+<b>{buy_asset}</b> [보유 중] | 현재가: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%) | ATR: {cur_atr:,.0f}<br>
+{buy_r['alignment']} | 체제 {'OK' if buy_r['regime'] else 'X'} | {buy_r['signal']}<br>
+보유: {shares_held}주 × 평균 {avg:,}원 | Stop: {cur_stop:,}원
+</div>""", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+<div class="signal-hold">
+<b>{buy_asset}</b> [미보유] | 현재가: {cur_price:,.0f}원 | ATR: {cur_atr:,.0f}<br>
+{buy_r['alignment']} | 체제 {'OK' if buy_r['regime'] else 'X'} | {buy_r['signal']}
+</div>""", unsafe_allow_html=True)
+
+                    st.markdown("---")
+                    risk_ps_auto = 2 * cur_atr if cur_atr > 0 else 0
+                    auto_qty = int(risk_amt / risk_ps_auto) if risk_ps_auto > 0 else 0
+                    auto_stop = int(cur_price - 2 * cur_atr) if cur_atr > 0 else int(cur_price * 0.92)
+
+                    buy_cols = st.columns(3)
+                    buy_qty = buy_cols[0].number_input(
+                        "매수 수량", 1, 100000,
+                        max(auto_qty, 1), key="buy_qty_t3"
+                    )
+                    buy_price = buy_cols[1].number_input(
+                        "매수 가격", 1, 99999999,
+                        int(cur_price), key="buy_price_t3"
+                    )
+                    buy_stop = buy_cols[2].number_input(
+                        "손절가", 1, 99999999,
+                        max(auto_stop, 1), key="buy_stop_t3"
+                    )
+
+                    buy_cost = buy_qty * buy_price
+                    risk_ps_actual = buy_price - buy_stop
+                    max_loss = risk_ps_actual * buy_qty
+                    stop_pct = risk_ps_actual / buy_price * 100 if buy_price > 0 else 0
+
+                    if is_held:
+                        new_total = shares_held + buy_qty
+                        new_avg = int((avg * shares_held + buy_price * buy_qty) / new_total)
+                        st.markdown(f"""
+<div class="signal-buy">
+<b>추가매수 시뮬레이션</b><br>
+{shares_held}주 × {avg:,}원 + {buy_qty}주 × {buy_price:,}원<br>
+→ <b>{new_total}주 × 평균 {new_avg:,}원</b> (비용: {buy_cost:,}원)<br>
+손절: {buy_stop:,}원 | 주당 리스크: {risk_ps_actual:,}원 | 최대 손실: {max_loss:,}원
+</div>""", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+<div class="signal-buy">
+<b>신규 매수 시뮬레이션</b><br>
+{buy_qty}주 × {buy_price:,}원 = <b>{buy_cost:,}원</b><br>
+손절: {buy_stop:,}원 (-{stop_pct:.1f}%)<br>
+주당 리스크: {risk_ps_actual:,}원 | 최대 손실: <b>{max_loss:,}원</b>
+</div>""", unsafe_allow_html=True)
+
+                    affordable = pf["cash"] - buy_cost
+                    st.caption(
+                        f"현금: {pf['cash']:,}원 | 차감 후: {affordable:,}원"
+                        + (" — 부족!" if affordable < 0 else "")
+                    )
+
+                    if auto_qty > 0 and (buy_qty > auto_qty * 1.2 or buy_qty < auto_qty * 0.8):
+                        st.caption(
+                            f"권장 수량(자동): {auto_qty}주 — 리스크 "
+                            f"{pf['risk_pct']*100:.1f}% / ATR 2배 손절 기준"
+                        )
+                    if stop_pct > 8.0:
+                        st.markdown(f"""
+<div class="signal-none">
+주의 — 손절폭 {stop_pct:.1f}%가 8%를 초과. 변동성 수축 후 재진입 권장.
+</div>""", unsafe_allow_html=True)
+
+                    buy_reason = st.text_input(
+                        "매수 사유", value="",
+                        placeholder="예: 55일 신고가 돌파 / 피벗 +1% / 변동성 수축 베이스",
+                        key="buy_reason_t3",
+                    )
+
+                    buy_apply_cols = st.columns([1.2, 1])
+                    buy_date = buy_apply_cols[0].date_input(
+                        "거래 날짜",
+                        value=datetime.now().date(),
+                        key="buy_date_t3",
+                        help="과거 매수를 백필하려면 날짜를 변경하세요",
+                    )
+                    buy_apply_cols[1].markdown("<br>", unsafe_allow_html=True)
+                    btn_label = "추가매수 적용" if is_held else "신규 매수 적용"
+                    if buy_apply_cols[1].button(btn_label, key="apply_buy_t3", type="primary"):
+                        if buy_cost > pf["cash"]:
+                            st.error(f"현금 부족: 필요 {buy_cost:,}원 / 보유 {pf['cash']:,}원")
+                        elif buy_stop >= buy_price:
+                            st.error(
+                                f"손절가({buy_stop:,})가 매수가({buy_price:,}) 이상 — "
+                                f"손절선은 매수가 아래여야 합니다"
+                            )
+                        else:
+                            trade_date = buy_date.strftime("%Y-%m-%d")
+                            is_backfill = buy_date != datetime.now().date()
+
+                            if is_held:
+                                existing["shares"] = new_total
+                                existing["avg_price"] = new_avg
+                                existing["trailing_stop"] = max(
+                                    existing.get("trailing_stop", 0), buy_stop
+                                )
+                                existing["current_value"] = int(cur_price * new_total)
+                                action_code = "ADD"
+                                action_label = "추가매수"
+                            elif existing:
+                                existing["shares"] = buy_qty
+                                existing["avg_price"] = buy_price
+                                existing["trailing_stop"] = buy_stop
+                                existing["current_value"] = int(cur_price * buy_qty)
+                                existing["entry_date"] = trade_date
+                                existing["note"] = "매수 (매수/매도 탭)"
+                                action_code = "BUY"
+                                action_label = "신규 매수"
+                            else:
+                                pf["positions"].append({
+                                    "asset": buy_asset,
+                                    "shares": buy_qty,
+                                    "avg_price": buy_price,
+                                    "current_value": int(cur_price * buy_qty),
+                                    "trailing_stop": buy_stop,
+                                    "entry_date": trade_date,
+                                    "note": "매수 (매수/매도 탭)",
+                                })
+                                action_code = "BUY"
+                                action_label = "신규 매수"
+
+                            pf["cash"] -= buy_cost
+                            pf["journal"].append({
+                                "date": trade_date,
+                                "action": action_code,
+                                "asset": buy_asset,
+                                "shares": buy_qty,
+                                "price": buy_price,
+                                "reason": (buy_reason or action_label)
+                                          + (" (백필)" if is_backfill else "")
+                                          + " [매수/매도 탭]",
+                            })
+                            pf["journal"].sort(key=lambda x: x.get("date", ""))
+                            ok = save_portfolio(
+                                pf,
+                                commit_msg=(
+                                    f"{action_code} {buy_asset} {buy_qty}주 @ "
+                                    f"{buy_price:,}원 ({trade_date})"
+                                ),
+                            )
+                            if ok:
+                                st.success(
+                                    f"{action_label} 완료 [{trade_date}]: "
+                                    f"{buy_qty}주 @ {buy_price:,}원, Stop {buy_stop:,}원"
+                                )
+                                st.rerun()
+            else:
+                # ── 매도 (보유 종목 한정) ───────────────
+                st.markdown("##### 매도 적용")
+                sellable = [p for p in pf["positions"] if p["shares"] > 0]
+                if not sellable:
+                    st.caption("보유 종목 없음")
+                else:
+                    sell_asset = st.selectbox(
+                        "종목", [p["asset"] for p in sellable], key="sell_asset"
+                    )
+                    sell_pos = next(p for p in sellable if p["asset"] == sell_asset)
+                    sell_r = next((r for r in results if r["name"] == sell_asset), None)
+                    ref_price = int(sell_r["price"]) if sell_r else int(sell_pos["avg_price"])
+                    held_qty = sell_pos["shares"]
+                    avg_buy = sell_pos["avg_price"]
+
+                    st.markdown(f"""
 <div class="signal-hold">
 <b>{sell_asset}</b> | 현재가: {ref_price:,}원<br>
 보유: {held_qty}주 × 평균 {avg_buy:,}원
 </div>""", unsafe_allow_html=True)
 
-                sell_cols = st.columns(2)
-                sell_qty = sell_cols[0].number_input(
-                    "매도 수량", min_value=1, max_value=held_qty,
-                    value=held_qty, key="sell_qty"
-                )
-                sell_price = sell_cols[1].number_input(
-                    "매도 가격", min_value=1, max_value=99999999,
-                    value=ref_price, key="sell_price"
-                )
-                sell_reason = st.text_input(
-                    "매도 사유", value="",
-                    placeholder="예: Stop 이탈 / Time Stop / 익절 / 신호 소실",
-                    key="sell_reason",
-                )
+                    sell_cols = st.columns(2)
+                    sell_qty = sell_cols[0].number_input(
+                        "매도 수량", min_value=1, max_value=held_qty,
+                        value=held_qty, key="sell_qty"
+                    )
+                    sell_price = sell_cols[1].number_input(
+                        "매도 가격", min_value=1, max_value=99999999,
+                        value=ref_price, key="sell_price"
+                    )
+                    sell_reason = st.text_input(
+                        "매도 사유", value="",
+                        placeholder="예: Stop 이탈 / Time Stop / 익절 / 신호 소실",
+                        key="sell_reason",
+                    )
 
-                proceeds = sell_qty * sell_price
-                pnl_amt = (sell_price - avg_buy) * sell_qty
-                pnl_pct = (sell_price - avg_buy) / avg_buy * 100 if avg_buy > 0 else 0
-                remain = held_qty - sell_qty
-                fully_close = (sell_qty >= held_qty)
+                    proceeds = sell_qty * sell_price
+                    pnl_amt = (sell_price - avg_buy) * sell_qty
+                    pnl_pct = (sell_price - avg_buy) / avg_buy * 100 if avg_buy > 0 else 0
+                    remain = held_qty - sell_qty
+                    fully_close = (sell_qty >= held_qty)
 
-                st.markdown(f"""
+                    st.markdown(f"""
 <div class="signal-buy">
 <b>매도 시뮬레이션</b><br>
 {sell_qty}주 × {sell_price:,}원 = <b>{proceeds:,}원</b> 회수<br>
@@ -1161,52 +1544,54 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
 적용 후 현금: {pf["cash"] + proceeds:,}원
 </div>""", unsafe_allow_html=True)
 
-                sell_apply_cols = st.columns([1.2, 1])
-                sell_date = sell_apply_cols[0].date_input(
-                    "거래 날짜",
-                    value=datetime.now().date(),
-                    key="sell_date",
-                    help="과거 매도를 백필하려면 날짜를 변경하세요",
-                )
-                sell_apply_cols[1].markdown("<br>", unsafe_allow_html=True)
-                if sell_apply_cols[1].button(
-                    "매도 적용", key="apply_sell", type="primary"
-                ):
-                    pf["cash"] += proceeds
-                    trade_date = sell_date.strftime("%Y-%m-%d")
-                    is_backfill = sell_date != datetime.now().date()
-                    if fully_close:
-                        pf["positions"] = [
-                            p for p in pf["positions"] if p["asset"] != sell_asset
-                        ]
-                        sell_kind = "SELL ALL"
-                    else:
-                        sell_pos["shares"] = remain
-                        sell_pos["current_value"] = int(ref_price * remain)
-                        sell_kind = "SELL"
-                    pf["journal"].append({
-                        "date": trade_date,
-                        "action": sell_kind,
-                        "asset": sell_asset,
-                        "shares": sell_qty,
-                        "price": sell_price,
-                        "pnl": int(pnl_amt),
-                        "reason": (sell_reason or "매도") + (" (백필)" if is_backfill else ""),
-                    })
-                    pf["journal"].sort(key=lambda x: x.get("date", ""))
-                    ok = save_portfolio(
-                        pf,
-                        commit_msg=(
-                            f"{sell_kind} {sell_asset} {sell_qty}주 @ {sell_price:,}원 "
-                            f"(PnL {pnl_amt:+,.0f}원, {trade_date})"
-                        ),
+                    sell_apply_cols = st.columns([1.2, 1])
+                    sell_date = sell_apply_cols[0].date_input(
+                        "거래 날짜",
+                        value=datetime.now().date(),
+                        key="sell_date",
+                        help="과거 매도를 백필하려면 날짜를 변경하세요",
                     )
-                    if ok:
-                        st.success(
-                            f"매도 적용 [{trade_date}]: {sell_qty}주 @ {sell_price:,}원, "
-                            f"손익 {pnl_amt:+,.0f}원"
+                    sell_apply_cols[1].markdown("<br>", unsafe_allow_html=True)
+                    if sell_apply_cols[1].button(
+                        "매도 적용", key="apply_sell", type="primary"
+                    ):
+                        pf["cash"] += proceeds
+                        trade_date = sell_date.strftime("%Y-%m-%d")
+                        is_backfill = sell_date != datetime.now().date()
+                        if fully_close:
+                            pf["positions"] = [
+                                p for p in pf["positions"] if p["asset"] != sell_asset
+                            ]
+                            sell_kind = "SELL ALL"
+                        else:
+                            sell_pos["shares"] = remain
+                            sell_pos["current_value"] = int(ref_price * remain)
+                            sell_kind = "SELL"
+                        pf["journal"].append({
+                            "date": trade_date,
+                            "action": sell_kind,
+                            "asset": sell_asset,
+                            "shares": sell_qty,
+                            "price": sell_price,
+                            "pnl": int(pnl_amt),
+                            "reason": (sell_reason or "매도")
+                                      + (" (백필)" if is_backfill else "")
+                                      + " [매수/매도 탭]",
+                        })
+                        pf["journal"].sort(key=lambda x: x.get("date", ""))
+                        ok = save_portfolio(
+                            pf,
+                            commit_msg=(
+                                f"{sell_kind} {sell_asset} {sell_qty}주 @ "
+                                f"{sell_price:,}원 (PnL {pnl_amt:+,.0f}원, {trade_date})"
+                            ),
                         )
-                        st.rerun()
+                        if ok:
+                            st.success(
+                                f"매도 적용 [{trade_date}]: {sell_qty}주 @ {sell_price:,}원, "
+                                f"손익 {pnl_amt:+,.0f}원"
+                            )
+                            st.rerun()
 
         with calc_tab4:
             st.markdown("##### 매매일지")
