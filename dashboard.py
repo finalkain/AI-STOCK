@@ -35,10 +35,12 @@ PORTFOLIO_FILE = Path(__file__).parent / "data" / "portfolio.json"
 DEFAULT_PORTFOLIO = {
     "total_capital": 3085500,
     "cash": 1642000,
+    "cash_usd": 0.0,
     "risk_pct": 0.01,
     "positions": [
         {
             "asset": "TIGER구리실물",
+            "currency": "KRW",
             "shares": 0,
             "avg_price": 0,
             "current_value": 1443500,
@@ -122,10 +124,71 @@ def load_portfolio():
     if PORTFOLIO_FILE.exists():
         try:
             with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                pf = json.load(f)
         except:
-            pass
-    return json.loads(json.dumps(DEFAULT_PORTFOLIO))
+            pf = json.loads(json.dumps(DEFAULT_PORTFOLIO))
+    else:
+        pf = json.loads(json.dumps(DEFAULT_PORTFOLIO))
+    # 호환 필드 보강 (구 포트폴리오 자동 마이그레이션)
+    pf.setdefault("cash_usd", 0.0)
+    for p in pf.get("positions", []):
+        if not p.get("currency"):
+            p["currency"] = detect_currency(p.get("asset", ""))
+    return pf
+
+
+# ── 통화 헬퍼 ──────────────────────────────────────
+_KR_ASSET_NAMES = {
+    "KOSPI", "삼성전자", "SK하이닉스", "TIGER구리실물", "KODEX200",
+    "KODEX골드선물", "KODEX반도체",
+}
+_USD_ASSET_NAMES = {
+    "S&P500", "NASDAQ", "Gold", "Copper", "WTI_Oil", "Bitcoin",
+    "SPY", "QQQ", "GLD", "SMH", "XLE", "COPX",
+}
+
+
+def detect_currency(name: str, ticker: str | None = None) -> str:
+    """티커/이름으로 통화 판정.
+    - 스캐너 후보: ticker가 .KS/.KQ → KRW, 아니면 USD
+    - results(ALL_ASSETS): 이름 기반 (한글 / KODEX·TIGER 접두어 → KRW)
+    """
+    if ticker:
+        return "KRW" if (ticker.endswith(".KS") or ticker.endswith(".KQ")) else "USD"
+    if not name:
+        return "KRW"
+    if name in _USD_ASSET_NAMES:
+        return "USD"
+    if name in _KR_ASSET_NAMES:
+        return "KRW"
+    # 한글 한 글자라도 포함 / KODEX·TIGER·KIWOOM·HANARO 접두어
+    if any("가" <= ch <= "힣" for ch in name):
+        return "KRW"
+    if name.startswith(("KODEX", "TIGER", "KIWOOM", "HANARO", "ACE", "ARIRANG", "PLUS")):
+        return "KRW"
+    return "USD"
+
+
+def fmt_money(amount, currency: str = "KRW") -> str:
+    if currency == "USD":
+        return f"${amount:,.2f}"
+    return f"{int(round(amount)):,}원"
+
+
+def money_unit(currency: str = "KRW") -> str:
+    return "$" if currency == "USD" else "원"
+
+
+def get_cash(pf, currency: str):
+    return pf.get("cash_usd", 0.0) if currency == "USD" else pf.get("cash", 0)
+
+
+def adjust_cash(pf, currency: str, delta):
+    """delta가 양수면 입금, 음수면 차감."""
+    if currency == "USD":
+        pf["cash_usd"] = round(pf.get("cash_usd", 0.0) + float(delta), 2)
+    else:
+        pf["cash"] = int(pf.get("cash", 0) + delta)
 
 
 def save_portfolio(pf, commit_msg=None):
@@ -360,6 +423,7 @@ def main():
 
     pf = load_portfolio()
     cash = pf["cash"]
+    cash_usd = pf.get("cash_usd", 0.0)
 
     with st.spinner("데이터 로딩 중..."):
         all_data = load_all_data()
@@ -370,48 +434,68 @@ def main():
         results.append(r)
     results.sort(key=lambda x: x["rs"], reverse=True)
 
-    # 총자산 실시간 계산 (현금 + 보유종목 시가평가)
-    pos_value = 0
+    # 통화별 평가가치 계산 (KRW / USD 분리)
+    pos_value_krw = 0
+    pos_value_usd = 0.0
     for pos in pf["positions"]:
+        ccy = pos.get("currency") or detect_currency(pos.get("asset", ""))
+        pos["currency"] = ccy  # 누락 보강
         asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
         if asset_r and pos["shares"] > 0:
-            pos["current_value"] = int(asset_r["price"] * pos["shares"])
-            pos_value += pos["current_value"]
-        elif pos.get("current_value", 0) > 0:
-            pos_value += pos["current_value"]
-    total = cash + pos_value
-    pf["total_capital"] = total
-    risk_amt = int(total * pf["risk_pct"])
+            cur_val = asset_r["price"] * pos["shares"]
+            pos["current_value"] = round(cur_val, 2) if ccy == "USD" else int(cur_val)
+        cur_val = pos.get("current_value", 0)
+        if pos["shares"] <= 0 and not cur_val:
+            continue
+        if ccy == "USD":
+            pos_value_usd += float(cur_val)
+        else:
+            pos_value_krw += int(cur_val)
+
+    total_krw = cash + pos_value_krw
+    total_usd = cash_usd + pos_value_usd
+    pf["total_capital"] = total_krw
+    pf["total_capital_usd"] = round(total_usd, 2)
+    risk_amt = int(total_krw * pf["risk_pct"])       # KRW 거래용
+    risk_amt_usd = round(total_usd * pf["risk_pct"], 2)  # USD 거래용
 
     # ── 상단: 포트폴리오 + 리스크 관리 ──────────────
     st.markdown(f"### 추세추종 터미널 | {datetime.now().strftime('%Y-%m-%d')}")
 
-    total_pnl = 0
+    total_pnl_krw = 0
+    total_pnl_usd = 0.0
     for pos in pf["positions"]:
         if pos["shares"] > 0 and pos["avg_price"] > 0:
             asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
             if asset_r:
-                total_pnl += (asset_r["price"] - pos["avg_price"]) * pos["shares"]
+                pnl = (asset_r["price"] - pos["avg_price"]) * pos["shares"]
+                if pos.get("currency") == "USD":
+                    total_pnl_usd += pnl
+                else:
+                    total_pnl_krw += pnl
 
-    # 포트 전체 리스크 (모든 포지션 동시 손절 시)
-    total_stop_loss = 0
+    # 포트 전체 리스크 (모든 포지션 동시 손절 시) — 통화별
+    stop_loss_krw = 0
+    stop_loss_usd = 0.0
     for pos in pf["positions"]:
         if pos["shares"] > 0 and pos.get("trailing_stop", 0) > 0:
             asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
             if asset_r:
-                loss_per_pos = (asset_r["price"] - pos["trailing_stop"]) * pos["shares"]
-                total_stop_loss += max(loss_per_pos, 0)
-    port_risk_pct = (total_stop_loss / total * 100) if total > 0 else 0
+                loss_per_pos = max((asset_r["price"] - pos["trailing_stop"]) * pos["shares"], 0)
+                if pos.get("currency") == "USD":
+                    stop_loss_usd += loss_per_pos
+                else:
+                    stop_loss_krw += loss_per_pos
+    port_risk_pct_krw = (stop_loss_krw / total_krw * 100) if total_krw > 0 else 0
+    port_risk_pct_usd = (stop_loss_usd / total_usd * 100) if total_usd > 0 else 0
 
-    top_row = st.columns([1, 1, 1, 1, 1, 1.5])
-    top_row[0].metric("총 자산", f"{total:,}원")
-    top_row[1].metric("평가손익", f"{total_pnl:+,.0f}원")
-    top_row[2].metric("현금", f"{cash:,}원")
-    top_row[3].metric("보유", f"{len(pf['positions'])}개")
-    top_row[4].metric("포트 리스크", f"{total_stop_loss:,.0f}원",
-                      delta=f"{port_risk_pct:.1f}%", delta_color="inverse")
-
-    # 리스크 슬라이더 + 필요수익률
+    # ── 1행: 자산 / 손익 / 현금 (원화·달러 분리) ─────
+    top_row = st.columns([1.2, 1.2, 1.2, 1.2, 0.8, 1.4])
+    top_row[0].metric("총 자산 (원화)", f"{total_krw:,}원")
+    top_row[1].metric("총 자산 (달러)", f"${total_usd:,.2f}")
+    top_row[2].metric("원화 현금", f"{cash:,}원")
+    top_row[3].metric("달러 현금", f"${cash_usd:,.2f}")
+    top_row[4].metric("보유", f"{len(pf['positions'])}개")
     with top_row[5]:
         risk_pct_input = st.slider(
             "거래당 최대 손실 (%)", 0.5, 5.0,
@@ -419,13 +503,23 @@ def main():
             key="risk_slider"
         )
         pf["risk_pct"] = risk_pct_input / 100
-        risk_amt = int(total * pf["risk_pct"])
+        risk_amt = int(total_krw * pf["risk_pct"])
+        risk_amt_usd = round(total_usd * pf["risk_pct"], 2)
         required_return = (1 / (1 - risk_pct_input / 100) - 1) * 100
         st.markdown(
-            f"리스크: **{risk_amt:,}원** | "
+            f"리스크: **{risk_amt:,}원** / **${risk_amt_usd:,.2f}** | "
             f"필요수익률: **{required_return:.2f}%**",
             unsafe_allow_html=True,
         )
+
+    # ── 2행: 평가손익 / 포트 리스크 (통화별) ─────
+    pnl_row = st.columns(4)
+    pnl_row[0].metric("평가손익 (원화)", f"{total_pnl_krw:+,.0f}원")
+    pnl_row[1].metric("평가손익 (달러)", f"${total_pnl_usd:+,.2f}")
+    pnl_row[2].metric("포트 리스크 (원화)", f"{stop_loss_krw:,.0f}원",
+                      delta=f"{port_risk_pct_krw:.1f}%", delta_color="inverse")
+    pnl_row[3].metric("포트 리스크 (달러)", f"${stop_loss_usd:,.2f}",
+                      delta=f"{port_risk_pct_usd:.1f}%", delta_color="inverse")
 
     st.divider()
 
@@ -610,18 +704,20 @@ def main():
                 return f"<small>실적 매출 {rev} / 영익 {op}{loss}</small><br>"
 
             def _render_card(sector_name, s, show_qty=True):
+                s_ccy = "KRW" if s.is_kr else "USD"
+                s_risk = risk_amt_usd if s_ccy == "USD" else risk_amt
                 stop = s.price - 2 * s.atr20
                 risk_ps = 2 * s.atr20
-                qty = int(risk_amt / risk_ps) if risk_ps > 0 else 0
+                qty = int(s_risk / risk_ps) if risk_ps > 0 else 0
                 brk = "55일돌파" if s.breakout_55d else ("20일돌파" if s.breakout_20d else "추세")
                 gap_str = f"{s.gap_pct:+.1f}%" if abs(s.gap_pct) >= 0.1 else "0%"
                 qty_line = (
-                    f"손절: {stop:,.0f} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>"
+                    f"손절: {fmt_money(stop, s_ccy)} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>"
                     if show_qty else ""
                 )
                 return f"""<div class="signal-hold">
-<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
-현재가: {s.price:,.0f} | {qty_line}<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
+<b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
+현재가: {fmt_money(s.price, s_ccy)} | {qty_line}<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
 {_fmt_fund(s)}</div>"""
 
             # ── A급: 매수 적기 ──────────────────
@@ -663,13 +759,14 @@ strict 필터 동시 만족 종목 없음.<br>
 <small>최근 돌파 후 피벗 눌림 / 갭상승 흡수 패턴 — 다음 거래일 재돌파 시 A급 승격 가능</small>
 </div>""", unsafe_allow_html=True)
                 for sector_name, s in nextday_list:
+                    s_ccy = "KRW" if s.is_kr else "USD"
                     reason = s.next_day_reason or "패턴 매칭"
                     stop = s.price - 2 * s.atr20
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{s.name}</b> ({sector_name}) — {reason}<br>
-현재가: {s.price:,.0f} | 피벗+{s.extended_pct:+.1f}% · 종가강도 {s.close_strength:.2f} · 거래량 {s.volume_ratio:.1f}x<br>
-<small>참고 손절: {stop:,.0f} | ATR {s.atr_pct:.1f}% · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
+<b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {reason}<br>
+현재가: {fmt_money(s.price, s_ccy)} | 피벗+{s.extended_pct:+.1f}% · 종가강도 {s.close_strength:.2f} · 거래량 {s.volume_ratio:.1f}x<br>
+<small>참고 손절: {fmt_money(stop, s_ccy)} | ATR {s.atr_pct:.1f}% · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             # ── 공시 리스크 종목 (사용 시 노출) ───
@@ -698,11 +795,12 @@ strict 필터 동시 만족 종목 없음.<br>
             if b_list:
                 with st.expander(f"B급 관찰 — {len(b_list)}종목 (relaxed: 갭≤5 · 거래량≥0.8 · 피벗≤5 · ATR≤8)"):
                     for sector_name, s in b_list:
+                        s_ccy = "KRW" if s.is_kr else "USD"
                         brk = "55일돌파" if s.breakout_55d else "20일돌파" if s.breakout_20d else "추세"
                         st.markdown(f"""
 <div class="signal-none">
-<b>{s.name}</b> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}%<br>
-<small>현재가 {s.price:,.0f} · 피벗+{s.extended_pct:.1f}% · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}% · [{s.filter_status}]</small>
+<b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}%<br>
+<small>현재가 {fmt_money(s.price, s_ccy)} · 피벗+{s.extended_pct:.1f}% · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}% · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             st.markdown("---")
@@ -717,10 +815,12 @@ strict 필터 동시 만족 종목 없음.<br>
                 if sr.leaders:
                     leader_data = []
                     for s in sr.leaders:
+                        s_ccy = "KRW" if s.is_kr else "USD"
                         leader_data.append({
                             "점수": s.score,
                             "종목": s.name,
-                            "현재가": f"{s.price:,.0f}",
+                            "통화": s_ccy,
+                            "현재가": fmt_money(s.price, s_ccy),
                             "거래대금": _fmt_turnover(s),
                             "ATR%": f"{s.atr_pct:.1f}",
                             "52주高": f"-{s.near_high_pct:.1f}%",
@@ -755,6 +855,7 @@ strict 필터 동시 만족 종목 없음.<br>
         if not pf["positions"]:
             st.info("보유 종목 없음")
         for pos in pf["positions"]:
+            pos_ccy = pos.get("currency", "KRW")
             asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
             if not asset_r:
                 st.warning(f'{pos["asset"]}: 데이터 없음')
@@ -762,7 +863,8 @@ strict 필터 동시 만족 종목 없음.<br>
 
             price = asset_r["price"]
             ts = pos.get("trailing_stop", 0)
-            new_ts = int(price - 2 * asset_r["atr20"])
+            new_ts_raw = price - 2 * asset_r["atr20"]
+            new_ts = round(new_ts_raw, 2) if pos_ccy == "USD" else int(new_ts_raw)
 
             if new_ts > ts:
                 pos["trailing_stop"] = new_ts
@@ -786,8 +888,9 @@ strict 필터 동시 만족 종목 없음.<br>
                 pnl_pct = (price - pos["avg_price"]) / pos["avg_price"] * 100
                 pnl_amt = (price - pos["avg_price"]) * pos["shares"]
                 eval_amt = price * pos["shares"]
-                pnl_str = (f"매입가: {pos['avg_price']:,}원 × {pos['shares']}주<br>"
-                           f"평가금: {eval_amt:,.0f}원 ({pnl_pct:+.1f}%, {pnl_amt:+,.0f}원)<br>")
+                pnl_str = (f"매입가: {fmt_money(pos['avg_price'], pos_ccy)} × {pos['shares']}주<br>"
+                           f"평가금: {fmt_money(eval_amt, pos_ccy)} "
+                           f"({pnl_pct:+.1f}%, {fmt_money(pnl_amt, pos_ccy)})<br>")
 
             # Time Stop 체크
             time_stop_warn = ""
@@ -805,9 +908,9 @@ strict 필터 동시 만족 종목 없음.<br>
 
             st.markdown(f"""
 <div class="signal-hold">
-<b>{pos['asset']}</b><br>
-현재가: {price:,.0f}원<br>
-{pnl_str}Stop: {ts:,}원 ({ts_gap:.1f}%)<br>
+<b>{pos['asset']}</b> <small>[{pos_ccy}]</small><br>
+현재가: {fmt_money(price, pos_ccy)}<br>
+{pnl_str}Stop: {fmt_money(ts, pos_ccy)} ({ts_gap:.1f}%)<br>
 상태: {status}<br>
 {asset_r['alignment']} | 체제 {'OK' if asset_r['regime'] else 'X'}{time_stop_warn}
 </div>
@@ -815,6 +918,10 @@ strict 필터 동시 만족 종목 없음.<br>
 
             # ── 추가매수 시뮬레이터 (인라인) ──
             if pos["shares"] > 0 and pos["avg_price"] > 0:
+                pos_ccy = pos.get("currency", "KRW")
+                pos_total = total_usd if pos_ccy == "USD" else total_krw
+                pos_max_risk = risk_amt_usd if pos_ccy == "USD" else risk_amt
+                unit = money_unit(pos_ccy)
                 pos_key = pos["asset"].replace(" ", "_")
                 with st.expander(f"{pos['asset']} 추가매수 계산"):
                     sim_cols = st.columns(2)
@@ -823,35 +930,41 @@ strict 필터 동시 만족 종목 없음.<br>
                         key=f"add_qty_{pos_key}"
                     )
                     add_price = sim_cols[1].number_input(
-                        "매수 예정가", min_value=1,
-                        value=int(price),
+                        f"매수 예정가 ({unit})",
+                        min_value=0.01 if pos_ccy == "USD" else 1.0,
+                        value=float(price),
+                        step=0.01 if pos_ccy == "USD" else 1.0,
+                        format="%.2f" if pos_ccy == "USD" else "%.0f",
                         key=f"add_price_{pos_key}"
                     )
 
                     old_shares = pos["shares"]
                     old_avg = pos["avg_price"]
                     new_total = old_shares + add_shares
-                    new_avg = int((old_avg * old_shares + add_price * add_shares) / new_total)
+                    new_avg_raw = (old_avg * old_shares + add_price * add_shares) / new_total
+                    new_avg = round(new_avg_raw, 2) if pos_ccy == "USD" else int(new_avg_raw)
                     add_cost = add_price * add_shares
 
                     # 같은 리스크(총자산의 risk_pct)로 새 Stop 계산
-                    max_risk = int(total * pf["risk_pct"])
-                    new_stop = int(new_avg - (max_risk / new_total))
+                    max_risk = pos_max_risk
+                    new_stop_raw = new_avg - (max_risk / new_total)
+                    new_stop = round(new_stop_raw, 2) if pos_ccy == "USD" else int(new_stop_raw)
                     new_stop_pct = (new_avg - new_stop) / new_avg * 100 if new_avg > 0 else 0
 
                     # ATR 기반 Stop (비교용)
-                    atr_stop = int(price - 2 * asset_r["atr20"])
+                    atr_stop_raw = price - 2 * asset_r["atr20"]
+                    atr_stop = round(atr_stop_raw, 2) if pos_ccy == "USD" else int(atr_stop_raw)
 
                     st.markdown(f"""
 <div class="signal-buy">
 <b>추가매수 시뮬레이션</b><br>
-현재: {old_shares}주 × 평균 {old_avg:,}원<br>
-추가: {add_shares}주 × {add_price:,}원 = {add_cost:,}원<br>
+현재: {old_shares}주 × 평균 {fmt_money(old_avg, pos_ccy)}<br>
+추가: {add_shares}주 × {fmt_money(add_price, pos_ccy)} = {fmt_money(add_cost, pos_ccy)}<br>
 <br>
-→ 합계: <b>{new_total}주</b> × 평균 <b>{new_avg:,}원</b><br>
-→ 리스크 {pf['risk_pct']*100:.1f}% 유지 Stop: <b>{new_stop:,}원</b> (-{new_stop_pct:.1f}%)<br>
-→ ATR 기반 Stop (참고): {atr_stop:,}원<br>
-→ 최대 손실: {max_risk:,}원 (총자산의 {pf['risk_pct']*100:.1f}%)
+→ 합계: <b>{new_total}주</b> × 평균 <b>{fmt_money(new_avg, pos_ccy)}</b><br>
+→ 리스크 {pf['risk_pct']*100:.1f}% 유지 Stop: <b>{fmt_money(new_stop, pos_ccy)}</b> (-{new_stop_pct:.1f}%)<br>
+→ ATR 기반 Stop (참고): {fmt_money(atr_stop, pos_ccy)}<br>
+→ 최대 손실: {fmt_money(max_risk, pos_ccy)} (총자산의 {pf['risk_pct']*100:.1f}%)
 </div>""", unsafe_allow_html=True)
 
                     if new_stop > ts:
@@ -880,20 +993,26 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                     if apply_cols[1].button(
                         "추가매수 적용", key=f"apply_add_{pos_key}", type="primary"
                     ):
-                        if add_cost > pf["cash"]:
-                            st.error(f"현금 부족: 필요 {add_cost:,}원 / 보유 {pf['cash']:,}원")
+                        bucket = get_cash(pf, pos_ccy)
+                        if add_cost > bucket:
+                            st.error(
+                                f"현금 부족: 필요 {fmt_money(add_cost, pos_ccy)} / "
+                                f"보유 {fmt_money(bucket, pos_ccy)}"
+                            )
                         else:
                             pos["shares"] = new_total
                             pos["avg_price"] = new_avg
                             pos["trailing_stop"] = apply_stop
-                            pos["current_value"] = int(price * new_total)
-                            pf["cash"] -= add_cost
+                            cv = price * new_total
+                            pos["current_value"] = round(cv, 2) if pos_ccy == "USD" else int(cv)
+                            adjust_cash(pf, pos_ccy, -add_cost)
                             trade_date = add_date_inline.strftime("%Y-%m-%d")
                             is_backfill = add_date_inline != datetime.now().date()
                             pf["journal"].append({
                                 "date": trade_date,
                                 "action": "ADD",
                                 "asset": pos["asset"],
+                                "currency": pos_ccy,
                                 "shares": add_shares,
                                 "price": add_price,
                                 "reason": "추가매수 (백필)" if is_backfill else "추가매수 (대시보드)",
@@ -902,14 +1021,16 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                             ok = save_portfolio(
                                 pf,
                                 commit_msg=(
-                                    f"ADD {pos['asset']} +{add_shares}주 @ {add_price:,}원"
-                                    f" ({trade_date})"
+                                    f"ADD {pos['asset']} +{add_shares}주 @ "
+                                    f"{fmt_money(add_price, pos_ccy)} ({trade_date})"
                                 ),
                             )
                             if ok:
                                 st.success(
-                                    f"적용 완료 [{trade_date}]: +{add_shares}주 @ {add_price:,}원 "
-                                    f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop:,}원"
+                                    f"적용 완료 [{trade_date}]: +{add_shares}주 @ "
+                                    f"{fmt_money(add_price, pos_ccy)} → {new_total}주 "
+                                    f"평균 {fmt_money(new_avg, pos_ccy)}, "
+                                    f"Stop {fmt_money(apply_stop, pos_ccy)}"
                                 )
                                 st.rerun()
 
@@ -923,18 +1044,22 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
             calc_asset = st.selectbox("종목", [r["name"] for r in results], key="calc_asset")
             calc_r = next(r for r in results if r["name"] == calc_asset)
 
+            calc_ccy = detect_currency(calc_asset)
+            calc_risk = risk_amt_usd if calc_ccy == "USD" else risk_amt
+            calc_cash = get_cash(pf, calc_ccy)
+
             price = calc_r["price"]
             atr = calc_r["atr20"]
             stop_price = price - 2 * atr
             risk_per_share = 2 * atr
 
             if risk_per_share > 0 and price > 0:
-                qty = int(risk_amt / risk_per_share)
+                qty = int(calc_risk / risk_per_share) if risk_per_share > 0 else 0
                 cost = qty * price
                 stop_pct = risk_per_share / price * 100
 
-                # ── 거래비용 (한국주 가정: 매도세 0.20% + 매매수수료 왕복 0.03% ≈ 0.23%) ──
-                FEE_PCT = 0.23
+                # ── 거래비용: 한국주(거래세+수수료 ≈ 0.23%) / 미국주(왕복 수수료 ≈ 0.10%) ──
+                FEE_PCT = 0.10 if calc_ccy == "USD" else 0.23
                 breakeven_price = price * (1 + FEE_PCT / 100)
 
                 # R배수 목표가 (gross)
@@ -944,37 +1069,36 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
 
                 # R배수 (net = 거래비용 차감)
                 fee_per_share = price * FEE_PCT / 100
-                r_eff = risk_per_share + fee_per_share  # 비용 반영한 실효 1R 거리
                 r1_net_pct = (r1 - price - fee_per_share) / price * 100
                 r2_net_pct = (r2 - price - fee_per_share) / price * 100
                 r3_net_pct = (r3 - price - fee_per_share) / price * 100
 
-                affordable = "O" if cost <= cash else "X"
+                affordable = "O" if cost <= calc_cash else "X"
 
                 st.markdown(f"""
 <div class="signal-hold">
-현재가: **{price:,.0f}원** | ATR: {atr:,.0f}<br>
+현재가: **{fmt_money(price, calc_ccy)}** | ATR: {atr:,.2f}<br>
 {calc_r['alignment']} | 체제 {'OK' if calc_r['regime'] else 'X'} | {calc_r['signal']}
 </div>
 """, unsafe_allow_html=True)
 
                 st.markdown(f"""
 <div class="signal-buy">
-<b>매수 계획</b><br>
-손절가: {stop_price:,.0f}원 (-{stop_pct:.1f}%)<br>
-수량: **{qty}주** × {price:,.0f} = **{cost:,}원**<br>
-최대손실: {risk_amt:,}원 ({risk_pct_input:.1f}%)<br>
-현금: {affordable} ({cash:,}원)
+<b>매수 계획</b> ({calc_ccy})<br>
+손절가: {fmt_money(stop_price, calc_ccy)} (-{stop_pct:.1f}%)<br>
+수량: **{qty}주** × {fmt_money(price, calc_ccy)} = **{fmt_money(cost, calc_ccy)}**<br>
+최대손실: {fmt_money(calc_risk, calc_ccy)} ({risk_pct_input:.1f}%)<br>
+현금: {affordable} ({fmt_money(calc_cash, calc_ccy)})
 </div>
 """, unsafe_allow_html=True)
 
                 st.markdown(f"""
 <div class="signal-hold">
 <b>목표가 (R배수, gross / net)</b><br>
-손익분기: {breakeven_price:,.0f}원 (+{FEE_PCT:.2f}% — 거래세·수수료)<br>
-1R (1:1): {r1:,.0f}원 (gross +{(r1/price-1)*100:.1f}% / net +{r1_net_pct:.1f}%)<br>
-2R (2:1): {r2:,.0f}원 (gross +{(r2/price-1)*100:.1f}% / net +{r2_net_pct:.1f}%)<br>
-3R (3:1): {r3:,.0f}원 (gross +{(r3/price-1)*100:.1f}% / net +{r3_net_pct:.1f}%)
+손익분기: {fmt_money(breakeven_price, calc_ccy)} (+{FEE_PCT:.2f}% — 거래세·수수료)<br>
+1R (1:1): {fmt_money(r1, calc_ccy)} (gross +{(r1/price-1)*100:.1f}% / net +{r1_net_pct:.1f}%)<br>
+2R (2:1): {fmt_money(r2, calc_ccy)} (gross +{(r2/price-1)*100:.1f}% / net +{r2_net_pct:.1f}%)<br>
+3R (3:1): {fmt_money(r3, calc_ccy)} (gross +{(r3/price-1)*100:.1f}% / net +{r3_net_pct:.1f}%)
 </div>
 """, unsafe_allow_html=True)
 
@@ -1083,6 +1207,11 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
                 elif kind == "held":
                     # ── 애드업 (보유 종목 추가매수) ─────────
                     addup_pos = next(p for p in held_positions if p["asset"] == asset_name)
+                    pos_ccy = addup_pos.get("currency", "KRW")
+                    pos_total = total_usd if pos_ccy == "USD" else total_krw
+                    pos_max_risk = risk_amt_usd if pos_ccy == "USD" else risk_amt
+                    pos_cash = get_cash(pf, pos_ccy)
+                    unit = money_unit(pos_ccy)
                     cur_price = sel_r["price"]
                     cur_atr = sel_r["atr20"]
                     avg = addup_pos["avg_price"]
@@ -1092,51 +1221,60 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
 
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{asset_name}</b> | 현재가: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%)<br>
-보유: {shares_held}주 × 평균 {avg:,}원 | Stop: {cur_stop:,}원
+<b>{asset_name}</b> | 현재가: {fmt_money(cur_price, pos_ccy)} ({cur_pnl_pct:+.1f}%)<br>
+보유: {shares_held}주 × 평균 {fmt_money(avg, pos_ccy)} | Stop: {fmt_money(cur_stop, pos_ccy)}
 </div>""", unsafe_allow_html=True)
 
                     st.markdown("---")
                     add_qty = st.number_input("추가 수량 (주)", 1, 100, 1, key="addup_qty2")
-                    add_price = st.number_input("매수 예정가 (원)", 1, 9999999,
-                                                int(cur_price), key="addup_price2")
+                    add_price = st.number_input(
+                        f"매수 예정가 ({unit})",
+                        min_value=0.01 if pos_ccy == "USD" else 1.0,
+                        value=float(cur_price),
+                        step=0.01 if pos_ccy == "USD" else 1.0,
+                        format="%.2f" if pos_ccy == "USD" else "%.0f",
+                        key="addup_price2"
+                    )
 
                     new_total = shares_held + add_qty
-                    new_avg = int((avg * shares_held + add_price * add_qty) / new_total)
+                    new_avg_raw = (avg * shares_held + add_price * add_qty) / new_total
+                    new_avg = round(new_avg_raw, 2) if pos_ccy == "USD" else int(new_avg_raw)
                     add_cost = add_price * add_qty
 
-                    max_risk = int(total * pf["risk_pct"])
-                    risk_stop = int(new_avg - (max_risk / new_total))
+                    max_risk = pos_max_risk
+                    risk_stop_raw = new_avg - (max_risk / new_total)
+                    risk_stop = round(risk_stop_raw, 2) if pos_ccy == "USD" else int(risk_stop_raw)
                     risk_stop_pct = (new_avg - risk_stop) / new_avg * 100 if new_avg > 0 else 0
-                    atr_stop = int(cur_price - 2 * cur_atr)
+                    atr_stop_raw = cur_price - 2 * cur_atr
+                    atr_stop = round(atr_stop_raw, 2) if pos_ccy == "USD" else int(atr_stop_raw)
                     rec_stop = max(risk_stop, atr_stop)
 
                     st.markdown(f"""
 <div class="signal-buy">
 <b>추가매수 후 변화</b><br>
-현재: {shares_held}주 × {avg:,}원<br>
-추가: +{add_qty}주 × {add_price:,}원 = {add_cost:,}원<br>
-합계: <b>{new_total}주 × {new_avg:,}원</b>
+현재: {shares_held}주 × {fmt_money(avg, pos_ccy)}<br>
+추가: +{add_qty}주 × {fmt_money(add_price, pos_ccy)} = {fmt_money(add_cost, pos_ccy)}<br>
+합계: <b>{new_total}주 × {fmt_money(new_avg, pos_ccy)}</b>
 </div>""", unsafe_allow_html=True)
 
                     st.markdown(f"""
 <div class="signal-buy">
 <b>새 Stop 가격</b><br>
-리스크 {pf['risk_pct']*100:.1f}% 유지: <b>{risk_stop:,}원</b> (-{risk_stop_pct:.1f}%)<br>
-ATR 기반 (2×ATR): {atr_stop:,}원<br>
-권장 (높은 값): <b>{rec_stop:,}원</b><br>
-최대 손실: {max_risk:,}원
+리스크 {pf['risk_pct']*100:.1f}% 유지: <b>{fmt_money(risk_stop, pos_ccy)}</b> (-{risk_stop_pct:.1f}%)<br>
+ATR 기반 (2×ATR): {fmt_money(atr_stop, pos_ccy)}<br>
+권장 (높은 값): <b>{fmt_money(rec_stop, pos_ccy)}</b><br>
+최대 손실: {fmt_money(max_risk, pos_ccy)}
 </div>""", unsafe_allow_html=True)
 
                     if rec_stop > cur_stop:
                         st.markdown(f"""
 <div class="signal-hold">
-Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
+Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)}</b>
 </div>""", unsafe_allow_html=True)
                     elif rec_stop < cur_stop:
                         st.markdown(f"""
 <div class="signal-none">
-주의: 새 Stop({rec_stop:,}) < 현재({cur_stop:,})<br>
+주의: 새 Stop({fmt_money(rec_stop, pos_ccy)}) < 현재({fmt_money(cur_stop, pos_ccy)})<br>
 현재 Stop을 내리지 마세요. 리스크 초과됩니다.
 </div>""", unsafe_allow_html=True)
 
@@ -1153,20 +1291,25 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     if apply_cols2[1].button(
                         "추가매수 적용", key="apply_addup_tab", type="primary"
                     ):
-                        if add_cost > pf["cash"]:
-                            st.error(f"현금 부족: 필요 {add_cost:,}원 / 보유 {pf['cash']:,}원")
+                        if add_cost > pos_cash:
+                            st.error(
+                                f"현금 부족: 필요 {fmt_money(add_cost, pos_ccy)} / "
+                                f"보유 {fmt_money(pos_cash, pos_ccy)}"
+                            )
                         else:
                             addup_pos["shares"] = new_total
                             addup_pos["avg_price"] = new_avg
                             addup_pos["trailing_stop"] = apply_stop2
-                            addup_pos["current_value"] = int(cur_price * new_total)
-                            pf["cash"] -= add_cost
+                            cv = cur_price * new_total
+                            addup_pos["current_value"] = round(cv, 2) if pos_ccy == "USD" else int(cv)
+                            adjust_cash(pf, pos_ccy, -add_cost)
                             trade_date = addup_date.strftime("%Y-%m-%d")
                             is_backfill = addup_date != datetime.now().date()
                             pf["journal"].append({
                                 "date": trade_date,
                                 "action": "ADD",
                                 "asset": asset_name,
+                                "currency": pos_ccy,
                                 "shares": add_qty,
                                 "price": add_price,
                                 "reason": "추가매수 (백필)" if is_backfill else "추가매수 (애드업 탭)",
@@ -1175,61 +1318,76 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             ok = save_portfolio(
                                 pf,
                                 commit_msg=(
-                                    f"ADD {asset_name} +{add_qty}주 @ {add_price:,}원"
-                                    f" ({trade_date})"
+                                    f"ADD {asset_name} +{add_qty}주 @ "
+                                    f"{fmt_money(add_price, pos_ccy)} ({trade_date})"
                                 ),
                             )
                             if ok:
                                 st.success(
-                                    f"적용 완료 [{trade_date}]: +{add_qty}주 @ {add_price:,}원 "
-                                    f"→ {new_total}주 평균 {new_avg:,}원, Stop {apply_stop2:,}원"
+                                    f"적용 완료 [{trade_date}]: +{add_qty}주 @ "
+                                    f"{fmt_money(add_price, pos_ccy)} → {new_total}주 "
+                                    f"평균 {fmt_money(new_avg, pos_ccy)}, "
+                                    f"Stop {fmt_money(apply_stop2, pos_ccy)}"
                                 )
                                 st.rerun()
                 else:
                     # ── 신규 매수 (A/B급 후보) ──────────────
                     cur_price = sel_c["price"]
                     cur_atr = sel_c["atr20"]
+                    sel_ccy = detect_currency(sel_c["name"], sel_c.get("ticker"))
+                    sel_risk = risk_amt_usd if sel_ccy == "USD" else risk_amt
+                    sel_cash = get_cash(pf, sel_ccy)
+                    unit = money_unit(sel_ccy)
                     src_label = "섹터스캐너" if sel_c["source"] == "scanner" else "자체분석"
                     sector_label = f" · {sel_c['sector']}" if sel_c.get("sector") else ""
 
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{asset_name}</b> [{tier}급]{sector_label} | 현재가: {cur_price:,.0f}원 | ATR: {cur_atr:,.0f}<br>
+<b>{asset_name}</b> [{tier}급]{sector_label} | 현재가: {fmt_money(cur_price, sel_ccy)} | ATR: {cur_atr:,.2f}<br>
 {sel_c['alignment']} | 체제 {'OK' if sel_c['regime'] else 'X'} | {sel_c['signal']} <small>({src_label})</small>
 </div>""", unsafe_allow_html=True)
 
                     st.markdown("---")
                     # ATR 기반 자동 산출 (참고용)
                     risk_per_share_auto = 2 * cur_atr if cur_atr > 0 else 0
-                    auto_qty = int(risk_amt / risk_per_share_auto) if risk_per_share_auto > 0 else 0
-                    auto_stop = int(cur_price - 2 * cur_atr) if cur_atr > 0 else int(cur_price * 0.92)
+                    auto_qty = int(sel_risk / risk_per_share_auto) if risk_per_share_auto > 0 else 0
+                    auto_stop_raw = cur_price - 2 * cur_atr if cur_atr > 0 else cur_price * 0.92
+                    auto_stop = round(auto_stop_raw, 2) if sel_ccy == "USD" else int(auto_stop_raw)
 
                     new_qty = st.number_input(
                         "매수 수량 (주)", 1, 100000,
                         max(auto_qty, 1), key="new_qty"
                     )
                     new_price = st.number_input(
-                        "매수 예정가 (원)", 1, 99999999,
-                        int(cur_price), key="new_price"
+                        f"매수 예정가 ({unit})",
+                        min_value=0.01 if sel_ccy == "USD" else 1.0,
+                        value=float(cur_price),
+                        step=0.01 if sel_ccy == "USD" else 1.0,
+                        format="%.2f" if sel_ccy == "USD" else "%.0f",
+                        key="new_price"
                     )
                     new_stop = st.number_input(
-                        "손절가 (원)", 1, 99999999,
-                        max(auto_stop, 1), key="new_stop"
+                        f"손절가 ({unit})",
+                        min_value=0.01 if sel_ccy == "USD" else 1.0,
+                        value=float(max(auto_stop, 1)),
+                        step=0.01 if sel_ccy == "USD" else 1.0,
+                        format="%.2f" if sel_ccy == "USD" else "%.0f",
+                        key="new_stop"
                     )
 
                     new_cost = new_qty * new_price
                     risk_ps_actual = new_price - new_stop
                     max_loss = risk_ps_actual * new_qty
                     stop_pct = risk_ps_actual / new_price * 100 if new_price > 0 else 0
-                    affordable = "OK" if new_cost <= pf["cash"] else "X 부족"
+                    affordable = "OK" if new_cost <= sel_cash else "X 부족"
 
                     st.markdown(f"""
 <div class="signal-buy">
-<b>신규 매수 계획</b><br>
-수량: <b>{new_qty}주</b> × {new_price:,}원 = <b>{new_cost:,}원</b><br>
-손절: {new_stop:,}원 (-{stop_pct:.1f}%)<br>
-주당 리스크: {risk_ps_actual:,}원 | 최대 손실: <b>{max_loss:,}원</b><br>
-현금: {affordable} ({pf['cash']:,}원)
+<b>신규 매수 계획</b> ({sel_ccy})<br>
+수량: <b>{new_qty}주</b> × {fmt_money(new_price, sel_ccy)} = <b>{fmt_money(new_cost, sel_ccy)}</b><br>
+손절: {fmt_money(new_stop, sel_ccy)} (-{stop_pct:.1f}%)<br>
+주당 리스크: {fmt_money(risk_ps_actual, sel_ccy)} | 최대 손실: <b>{fmt_money(max_loss, sel_ccy)}</b><br>
+현금: {affordable} ({fmt_money(sel_cash, sel_ccy)})
 </div>""", unsafe_allow_html=True)
 
                     if auto_qty > 0 and (new_qty > auto_qty * 1.2 or new_qty < auto_qty * 0.8):
@@ -1254,10 +1412,17 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     if apply_cols_new[1].button(
                         "신규 매수 적용", key="apply_new_buy", type="primary"
                     ):
-                        if new_cost > pf["cash"]:
-                            st.error(f"현금 부족: 필요 {new_cost:,}원 / 보유 {pf['cash']:,}원")
+                        if new_cost > sel_cash:
+                            st.error(
+                                f"현금 부족: 필요 {fmt_money(new_cost, sel_ccy)} / "
+                                f"보유 {fmt_money(sel_cash, sel_ccy)}"
+                            )
                         elif new_stop >= new_price:
-                            st.error(f"손절가({new_stop:,})가 매수가({new_price:,}) 이상 — 손절선은 매수가 아래여야 합니다")
+                            st.error(
+                                f"손절가({fmt_money(new_stop, sel_ccy)})가 매수가"
+                                f"({fmt_money(new_price, sel_ccy)}) 이상 — "
+                                f"손절선은 매수가 아래여야 합니다"
+                            )
                         else:
                             trade_date = new_date.strftime("%Y-%m-%d")
                             is_backfill = new_date != datetime.now().date()
@@ -1265,28 +1430,33 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                                 (p for p in pf["positions"] if p["asset"] == asset_name),
                                 None,
                             )
+                            cv = cur_price * new_qty
+                            cv_stored = round(cv, 2) if sel_ccy == "USD" else int(cv)
                             if existing:
+                                existing["currency"] = sel_ccy
                                 existing["shares"] = new_qty
                                 existing["avg_price"] = new_price
                                 existing["trailing_stop"] = new_stop
-                                existing["current_value"] = int(cur_price * new_qty)
+                                existing["current_value"] = cv_stored
                                 existing["entry_date"] = trade_date
                                 existing["note"] = f"신규 매수 ({tier}급)"
                             else:
                                 pf["positions"].append({
                                     "asset": asset_name,
+                                    "currency": sel_ccy,
                                     "shares": new_qty,
                                     "avg_price": new_price,
-                                    "current_value": int(cur_price * new_qty),
+                                    "current_value": cv_stored,
                                     "trailing_stop": new_stop,
                                     "entry_date": trade_date,
                                     "note": f"신규 매수 ({tier}급)",
                                 })
-                            pf["cash"] -= new_cost
+                            adjust_cash(pf, sel_ccy, -new_cost)
                             pf["journal"].append({
                                 "date": trade_date,
                                 "action": "BUY",
                                 "asset": asset_name,
+                                "currency": sel_ccy,
                                 "shares": new_qty,
                                 "price": new_price,
                                 "reason": (
@@ -1298,14 +1468,15 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             ok = save_portfolio(
                                 pf,
                                 commit_msg=(
-                                    f"BUY {asset_name} {new_qty}주 @ {new_price:,}원"
-                                    f" ({tier}급, {trade_date})"
+                                    f"BUY {asset_name} {new_qty}주 @ "
+                                    f"{fmt_money(new_price, sel_ccy)} ({tier}급, {trade_date})"
                                 ),
                             )
                             if ok:
                                 st.success(
-                                    f"신규 매수 완료 [{trade_date}]: {new_qty}주 @ {new_price:,}원, "
-                                    f"Stop {new_stop:,}원"
+                                    f"신규 매수 완료 [{trade_date}]: {new_qty}주 @ "
+                                    f"{fmt_money(new_price, sel_ccy)}, "
+                                    f"Stop {fmt_money(new_stop, sel_ccy)}"
                                 )
                                 st.rerun()
 
@@ -1331,6 +1502,13 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     )
                     is_held = existing is not None and existing["shares"] > 0
 
+                    # 통화 판정: 보유 중이면 보유 통화 우선, 아니면 이름 기반
+                    buy_ccy = (existing.get("currency") if existing else None) \
+                              or detect_currency(buy_asset)
+                    buy_risk = risk_amt_usd if buy_ccy == "USD" else risk_amt
+                    buy_cash_bucket = get_cash(pf, buy_ccy)
+                    unit = money_unit(buy_ccy)
+
                     if is_held:
                         avg = existing["avg_price"]
                         shares_held = existing["shares"]
@@ -1338,21 +1516,22 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                         cur_pnl_pct = (cur_price - avg) / avg * 100 if avg > 0 else 0
                         st.markdown(f"""
 <div class="signal-hold">
-<b>{buy_asset}</b> [보유 중] | 현재가: {cur_price:,.0f}원 ({cur_pnl_pct:+.1f}%) | ATR: {cur_atr:,.0f}<br>
+<b>{buy_asset}</b> [보유 중] | 현재가: {fmt_money(cur_price, buy_ccy)} ({cur_pnl_pct:+.1f}%) | ATR: {cur_atr:,.2f}<br>
 {buy_r['alignment']} | 체제 {'OK' if buy_r['regime'] else 'X'} | {buy_r['signal']}<br>
-보유: {shares_held}주 × 평균 {avg:,}원 | Stop: {cur_stop:,}원
+보유: {shares_held}주 × 평균 {fmt_money(avg, buy_ccy)} | Stop: {fmt_money(cur_stop, buy_ccy)}
 </div>""", unsafe_allow_html=True)
                     else:
                         st.markdown(f"""
 <div class="signal-hold">
-<b>{buy_asset}</b> [미보유] | 현재가: {cur_price:,.0f}원 | ATR: {cur_atr:,.0f}<br>
+<b>{buy_asset}</b> [미보유] | 현재가: {fmt_money(cur_price, buy_ccy)} | ATR: {cur_atr:,.2f}<br>
 {buy_r['alignment']} | 체제 {'OK' if buy_r['regime'] else 'X'} | {buy_r['signal']}
 </div>""", unsafe_allow_html=True)
 
                     st.markdown("---")
                     risk_ps_auto = 2 * cur_atr if cur_atr > 0 else 0
-                    auto_qty = int(risk_amt / risk_ps_auto) if risk_ps_auto > 0 else 0
-                    auto_stop = int(cur_price - 2 * cur_atr) if cur_atr > 0 else int(cur_price * 0.92)
+                    auto_qty = int(buy_risk / risk_ps_auto) if risk_ps_auto > 0 else 0
+                    auto_stop_raw = cur_price - 2 * cur_atr if cur_atr > 0 else cur_price * 0.92
+                    auto_stop = round(auto_stop_raw, 2) if buy_ccy == "USD" else int(auto_stop_raw)
 
                     buy_cols = st.columns(3)
                     buy_qty = buy_cols[0].number_input(
@@ -1360,12 +1539,20 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                         max(auto_qty, 1), key="buy_qty_t3"
                     )
                     buy_price = buy_cols[1].number_input(
-                        "매수 가격", 1, 99999999,
-                        int(cur_price), key="buy_price_t3"
+                        f"매수 가격 ({unit})",
+                        min_value=0.01 if buy_ccy == "USD" else 1.0,
+                        value=float(cur_price),
+                        step=0.01 if buy_ccy == "USD" else 1.0,
+                        format="%.2f" if buy_ccy == "USD" else "%.0f",
+                        key="buy_price_t3"
                     )
                     buy_stop = buy_cols[2].number_input(
-                        "손절가", 1, 99999999,
-                        max(auto_stop, 1), key="buy_stop_t3"
+                        f"손절가 ({unit})",
+                        min_value=0.01 if buy_ccy == "USD" else 1.0,
+                        value=float(max(auto_stop, 1)),
+                        step=0.01 if buy_ccy == "USD" else 1.0,
+                        format="%.2f" if buy_ccy == "USD" else "%.0f",
+                        key="buy_stop_t3"
                     )
 
                     buy_cost = buy_qty * buy_price
@@ -1375,26 +1562,28 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
 
                     if is_held:
                         new_total = shares_held + buy_qty
-                        new_avg = int((avg * shares_held + buy_price * buy_qty) / new_total)
+                        new_avg_raw = (avg * shares_held + buy_price * buy_qty) / new_total
+                        new_avg = round(new_avg_raw, 2) if buy_ccy == "USD" else int(new_avg_raw)
                         st.markdown(f"""
 <div class="signal-buy">
 <b>추가매수 시뮬레이션</b><br>
-{shares_held}주 × {avg:,}원 + {buy_qty}주 × {buy_price:,}원<br>
-→ <b>{new_total}주 × 평균 {new_avg:,}원</b> (비용: {buy_cost:,}원)<br>
-손절: {buy_stop:,}원 | 주당 리스크: {risk_ps_actual:,}원 | 최대 손실: {max_loss:,}원
+{shares_held}주 × {fmt_money(avg, buy_ccy)} + {buy_qty}주 × {fmt_money(buy_price, buy_ccy)}<br>
+→ <b>{new_total}주 × 평균 {fmt_money(new_avg, buy_ccy)}</b> (비용: {fmt_money(buy_cost, buy_ccy)})<br>
+손절: {fmt_money(buy_stop, buy_ccy)} | 주당 리스크: {fmt_money(risk_ps_actual, buy_ccy)} | 최대 손실: {fmt_money(max_loss, buy_ccy)}
 </div>""", unsafe_allow_html=True)
                     else:
                         st.markdown(f"""
 <div class="signal-buy">
-<b>신규 매수 시뮬레이션</b><br>
-{buy_qty}주 × {buy_price:,}원 = <b>{buy_cost:,}원</b><br>
-손절: {buy_stop:,}원 (-{stop_pct:.1f}%)<br>
-주당 리스크: {risk_ps_actual:,}원 | 최대 손실: <b>{max_loss:,}원</b>
+<b>신규 매수 시뮬레이션</b> ({buy_ccy})<br>
+{buy_qty}주 × {fmt_money(buy_price, buy_ccy)} = <b>{fmt_money(buy_cost, buy_ccy)}</b><br>
+손절: {fmt_money(buy_stop, buy_ccy)} (-{stop_pct:.1f}%)<br>
+주당 리스크: {fmt_money(risk_ps_actual, buy_ccy)} | 최대 손실: <b>{fmt_money(max_loss, buy_ccy)}</b>
 </div>""", unsafe_allow_html=True)
 
-                    affordable = pf["cash"] - buy_cost
+                    affordable = buy_cash_bucket - buy_cost
                     st.caption(
-                        f"현금: {pf['cash']:,}원 | 차감 후: {affordable:,}원"
+                        f"현금: {fmt_money(buy_cash_bucket, buy_ccy)} | "
+                        f"차감 후: {fmt_money(affordable, buy_ccy)}"
                         + (" — 부족!" if affordable < 0 else "")
                     )
 
@@ -1425,31 +1614,39 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     buy_apply_cols[1].markdown("<br>", unsafe_allow_html=True)
                     btn_label = "추가매수 적용" if is_held else "신규 매수 적용"
                     if buy_apply_cols[1].button(btn_label, key="apply_buy_t3", type="primary"):
-                        if buy_cost > pf["cash"]:
-                            st.error(f"현금 부족: 필요 {buy_cost:,}원 / 보유 {pf['cash']:,}원")
+                        if buy_cost > buy_cash_bucket:
+                            st.error(
+                                f"현금 부족: 필요 {fmt_money(buy_cost, buy_ccy)} / "
+                                f"보유 {fmt_money(buy_cash_bucket, buy_ccy)}"
+                            )
                         elif buy_stop >= buy_price:
                             st.error(
-                                f"손절가({buy_stop:,})가 매수가({buy_price:,}) 이상 — "
+                                f"손절가({fmt_money(buy_stop, buy_ccy)})가 매수가"
+                                f"({fmt_money(buy_price, buy_ccy)}) 이상 — "
                                 f"손절선은 매수가 아래여야 합니다"
                             )
                         else:
                             trade_date = buy_date.strftime("%Y-%m-%d")
                             is_backfill = buy_date != datetime.now().date()
+                            cv_now = cur_price * (new_total if is_held else buy_qty)
+                            cv_stored = round(cv_now, 2) if buy_ccy == "USD" else int(cv_now)
 
                             if is_held:
+                                existing["currency"] = buy_ccy
                                 existing["shares"] = new_total
                                 existing["avg_price"] = new_avg
                                 existing["trailing_stop"] = max(
                                     existing.get("trailing_stop", 0), buy_stop
                                 )
-                                existing["current_value"] = int(cur_price * new_total)
+                                existing["current_value"] = cv_stored
                                 action_code = "ADD"
                                 action_label = "추가매수"
                             elif existing:
+                                existing["currency"] = buy_ccy
                                 existing["shares"] = buy_qty
                                 existing["avg_price"] = buy_price
                                 existing["trailing_stop"] = buy_stop
-                                existing["current_value"] = int(cur_price * buy_qty)
+                                existing["current_value"] = cv_stored
                                 existing["entry_date"] = trade_date
                                 existing["note"] = "매수 (매수/매도 탭)"
                                 action_code = "BUY"
@@ -1457,9 +1654,10 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             else:
                                 pf["positions"].append({
                                     "asset": buy_asset,
+                                    "currency": buy_ccy,
                                     "shares": buy_qty,
                                     "avg_price": buy_price,
-                                    "current_value": int(cur_price * buy_qty),
+                                    "current_value": cv_stored,
                                     "trailing_stop": buy_stop,
                                     "entry_date": trade_date,
                                     "note": "매수 (매수/매도 탭)",
@@ -1467,11 +1665,12 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                                 action_code = "BUY"
                                 action_label = "신규 매수"
 
-                            pf["cash"] -= buy_cost
+                            adjust_cash(pf, buy_ccy, -buy_cost)
                             pf["journal"].append({
                                 "date": trade_date,
                                 "action": action_code,
                                 "asset": buy_asset,
+                                "currency": buy_ccy,
                                 "shares": buy_qty,
                                 "price": buy_price,
                                 "reason": (buy_reason or action_label)
@@ -1483,13 +1682,14 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                                 pf,
                                 commit_msg=(
                                     f"{action_code} {buy_asset} {buy_qty}주 @ "
-                                    f"{buy_price:,}원 ({trade_date})"
+                                    f"{fmt_money(buy_price, buy_ccy)} ({trade_date})"
                                 ),
                             )
                             if ok:
                                 st.success(
                                     f"{action_label} 완료 [{trade_date}]: "
-                                    f"{buy_qty}주 @ {buy_price:,}원, Stop {buy_stop:,}원"
+                                    f"{buy_qty}주 @ {fmt_money(buy_price, buy_ccy)}, "
+                                    f"Stop {fmt_money(buy_stop, buy_ccy)}"
                                 )
                                 st.rerun()
             else:
@@ -1503,15 +1703,18 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                         "종목", [p["asset"] for p in sellable], key="sell_asset"
                     )
                     sell_pos = next(p for p in sellable if p["asset"] == sell_asset)
+                    sell_ccy = sell_pos.get("currency", "KRW")
+                    sell_cash_bucket = get_cash(pf, sell_ccy)
+                    unit = money_unit(sell_ccy)
                     sell_r = next((r for r in results if r["name"] == sell_asset), None)
-                    ref_price = int(sell_r["price"]) if sell_r else int(sell_pos["avg_price"])
+                    ref_price = sell_r["price"] if sell_r else sell_pos["avg_price"]
                     held_qty = sell_pos["shares"]
                     avg_buy = sell_pos["avg_price"]
 
                     st.markdown(f"""
 <div class="signal-hold">
-<b>{sell_asset}</b> | 현재가: {ref_price:,}원<br>
-보유: {held_qty}주 × 평균 {avg_buy:,}원
+<b>{sell_asset}</b> | 현재가: {fmt_money(ref_price, sell_ccy)}<br>
+보유: {held_qty}주 × 평균 {fmt_money(avg_buy, sell_ccy)}
 </div>""", unsafe_allow_html=True)
 
                     sell_cols = st.columns(2)
@@ -1520,8 +1723,12 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                         value=held_qty, key="sell_qty"
                     )
                     sell_price = sell_cols[1].number_input(
-                        "매도 가격", min_value=1, max_value=99999999,
-                        value=ref_price, key="sell_price"
+                        f"매도 가격 ({unit})",
+                        min_value=0.01 if sell_ccy == "USD" else 1.0,
+                        value=float(ref_price),
+                        step=0.01 if sell_ccy == "USD" else 1.0,
+                        format="%.2f" if sell_ccy == "USD" else "%.0f",
+                        key="sell_price"
                     )
                     sell_reason = st.text_input(
                         "매도 사유", value="",
@@ -1538,10 +1745,10 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     st.markdown(f"""
 <div class="signal-buy">
 <b>매도 시뮬레이션</b><br>
-{sell_qty}주 × {sell_price:,}원 = <b>{proceeds:,}원</b> 회수<br>
-손익: <b>{pnl_amt:+,.0f}원</b> ({pnl_pct:+.1f}%)<br>
+{sell_qty}주 × {fmt_money(sell_price, sell_ccy)} = <b>{fmt_money(proceeds, sell_ccy)}</b> 회수<br>
+손익: <b>{fmt_money(pnl_amt, sell_ccy)}</b> ({pnl_pct:+.1f}%)<br>
 잔여: {remain}주 {"(전량 매도 — 포지션 제거)" if fully_close else ""}<br>
-적용 후 현금: {pf["cash"] + proceeds:,}원
+적용 후 현금: {fmt_money(sell_cash_bucket + proceeds, sell_ccy)}
 </div>""", unsafe_allow_html=True)
 
                     sell_apply_cols = st.columns([1.2, 1])
@@ -1555,7 +1762,7 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     if sell_apply_cols[1].button(
                         "매도 적용", key="apply_sell", type="primary"
                     ):
-                        pf["cash"] += proceeds
+                        adjust_cash(pf, sell_ccy, proceeds)
                         trade_date = sell_date.strftime("%Y-%m-%d")
                         is_backfill = sell_date != datetime.now().date()
                         if fully_close:
@@ -1565,15 +1772,18 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             sell_kind = "SELL ALL"
                         else:
                             sell_pos["shares"] = remain
-                            sell_pos["current_value"] = int(ref_price * remain)
+                            cv = ref_price * remain
+                            sell_pos["current_value"] = round(cv, 2) if sell_ccy == "USD" else int(cv)
                             sell_kind = "SELL"
+                        pnl_record = round(pnl_amt, 2) if sell_ccy == "USD" else int(pnl_amt)
                         pf["journal"].append({
                             "date": trade_date,
                             "action": sell_kind,
                             "asset": sell_asset,
+                            "currency": sell_ccy,
                             "shares": sell_qty,
                             "price": sell_price,
-                            "pnl": int(pnl_amt),
+                            "pnl": pnl_record,
                             "reason": (sell_reason or "매도")
                                       + (" (백필)" if is_backfill else "")
                                       + " [매수/매도 탭]",
@@ -1583,13 +1793,15 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                             pf,
                             commit_msg=(
                                 f"{sell_kind} {sell_asset} {sell_qty}주 @ "
-                                f"{sell_price:,}원 (PnL {pnl_amt:+,.0f}원, {trade_date})"
+                                f"{fmt_money(sell_price, sell_ccy)} "
+                                f"(PnL {fmt_money(pnl_amt, sell_ccy)}, {trade_date})"
                             ),
                         )
                         if ok:
                             st.success(
-                                f"매도 적용 [{trade_date}]: {sell_qty}주 @ {sell_price:,}원, "
-                                f"손익 {pnl_amt:+,.0f}원"
+                                f"매도 적용 [{trade_date}]: {sell_qty}주 @ "
+                                f"{fmt_money(sell_price, sell_ccy)}, "
+                                f"손익 {fmt_money(pnl_amt, sell_ccy)}"
                             )
                             st.rerun()
 
@@ -1600,24 +1812,33 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                 st.caption("기록된 매매가 없습니다.")
             else:
                 rows = []
-                realized_pnl = 0
+                realized_krw = 0
+                realized_usd = 0.0
                 buys, sells = 0, 0
                 for e in journal:
                     action = e.get("action", "-")
+                    e_ccy = e.get("currency") or detect_currency(e.get("asset", ""))
                     if action.startswith("SELL"):
                         sells += 1
-                        realized_pnl += int(e.get("pnl", 0) or 0)
+                        pnl_v = e.get("pnl") or 0
+                        if e_ccy == "USD":
+                            realized_usd += float(pnl_v)
+                        else:
+                            realized_krw += int(pnl_v)
                     elif action in ("BUY", "ADD"):
                         buys += 1
                     pnl_v = e.get("pnl")
+                    price_v = e.get("price", 0) or 0
+                    shares_v = e.get("shares", 0) or 0
                     rows.append({
                         "날짜": e.get("date", "-"),
                         "구분": action,
+                        "통화": e_ccy,
                         "종목": e.get("asset", "-"),
-                        "수량": e.get("shares", 0),
-                        "단가(원)": f"{int(e.get('price', 0)):,}",
-                        "거래액(원)": f"{int(e.get('shares', 0)) * int(e.get('price', 0)):,}",
-                        "손익(원)": f"{int(pnl_v):+,}" if pnl_v is not None else "-",
+                        "수량": shares_v,
+                        "단가": fmt_money(price_v, e_ccy),
+                        "거래액": fmt_money(price_v * shares_v, e_ccy),
+                        "손익": fmt_money(pnl_v, e_ccy) if pnl_v is not None else "-",
                         "사유": e.get("reason", "-"),
                     })
                 st.dataframe(
@@ -1627,12 +1848,16 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                     height=min(len(rows) * 38 + 40, 360),
                 )
 
-                stat_cols = st.columns(3)
+                stat_cols = st.columns(4)
                 stat_cols[0].metric("총 거래", f"{len(journal)}건")
                 stat_cols[1].metric("매수/매도", f"{buys} / {sells}")
                 stat_cols[2].metric(
-                    "실현손익", f"{realized_pnl:+,}원",
-                    delta_color="normal" if realized_pnl >= 0 else "inverse",
+                    "실현손익 (원화)", f"{realized_krw:+,}원",
+                    delta_color="normal" if realized_krw >= 0 else "inverse",
+                )
+                stat_cols[3].metric(
+                    "실현손익 (달러)", f"${realized_usd:+,.2f}",
+                    delta_color="normal" if realized_usd >= 0 else "inverse",
                 )
 
                 # ── TXT 매매일지 생성 ──
@@ -1644,36 +1869,38 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
                 )
                 lines.append(
                     f"거래 {len(journal)}건 | 매수 {buys} / 매도 {sells} | "
-                    f"실현손익 {realized_pnl:+,}원"
+                    f"실현손익 원화 {realized_krw:+,}원 / 달러 ${realized_usd:+,.2f}"
                 )
                 lines.append("=" * 70)
                 lines.append("")
                 for e in journal:
                     action = e.get("action", "-")
-                    shares = int(e.get("shares", 0))
-                    price = int(e.get("price", 0))
+                    e_ccy = e.get("currency") or detect_currency(e.get("asset", ""))
+                    shares = e.get("shares", 0) or 0
+                    price = e.get("price", 0) or 0
                     amount = shares * price
-                    lines.append(f"[{e.get('date', '-')}] {action} {e.get('asset', '-')}")
+                    lines.append(f"[{e.get('date', '-')}] {action} {e.get('asset', '-')} [{e_ccy}]")
                     lines.append(f"  수량 : {shares}주")
-                    lines.append(f"  단가 : {price:,}원")
-                    lines.append(f"  거래액: {amount:,}원")
+                    lines.append(f"  단가 : {fmt_money(price, e_ccy)}")
+                    lines.append(f"  거래액: {fmt_money(amount, e_ccy)}")
                     if e.get("pnl") is not None:
-                        lines.append(f"  손익 : {int(e['pnl']):+,}원")
+                        lines.append(f"  손익 : {fmt_money(e['pnl'], e_ccy)}")
                     lines.append(f"  사유 : {e.get('reason', '-')}")
                     lines.append("")
                 lines.append("-" * 70)
                 lines.append("[현재 보유]")
                 if pf.get("positions"):
                     for p in pf["positions"]:
+                        p_ccy = p.get("currency", "KRW")
                         lines.append(
-                            f"  - {p['asset']}: {p.get('shares', 0)}주 × "
-                            f"평균 {p.get('avg_price', 0):,}원, "
-                            f"Stop {p.get('trailing_stop', 0):,}원 "
+                            f"  - {p['asset']} [{p_ccy}]: {p.get('shares', 0)}주 × "
+                            f"평균 {fmt_money(p.get('avg_price', 0), p_ccy)}, "
+                            f"Stop {fmt_money(p.get('trailing_stop', 0), p_ccy)} "
                             f"(진입 {p.get('entry_date', '-')})"
                         )
                 else:
                     lines.append("  보유 종목 없음")
-                lines.append(f"  현금 : {pf.get('cash', 0):,}원")
+                lines.append(f"  현금 : {pf.get('cash', 0):,}원 / ${pf.get('cash_usd', 0.0):,.2f}")
                 lines.append("=" * 70)
                 txt_content = "\n".join(lines)
 
@@ -1704,13 +1931,14 @@ Stop 상향: {cur_stop:,} → <b>{rec_stop:,}원</b> (+{rec_stop-cur_stop:,}원)
     with chart_cols[1]:
         selected = st.selectbox("종목 선택", asset_names, index=default_idx)
         sel_r = next(r for r in results if r["name"] == selected)
+        sel_ccy = detect_currency(selected)
 
         st.markdown(f"""
-**{selected}**
-- 현재가: {sel_r['price']:,.0f}
-- ATR(20): {sel_r['atr20']:,.0f}
-- MA50: {sel_r['ma50']:,.0f}
-- MA200: {sel_r['ma200']:,.0f}
+**{selected}** [{sel_ccy}]
+- 현재가: {fmt_money(sel_r['price'], sel_ccy)}
+- ATR(20): {sel_r['atr20']:,.2f}
+- MA50: {fmt_money(sel_r['ma50'], sel_ccy)}
+- MA200: {fmt_money(sel_r['ma200'], sel_ccy)}
 - 이평선: {sel_r['alignment']}
 - 체제: {'OK' if sel_r['regime'] else 'X'}
 - 52주高: -{sel_r['near_high']:.1f}%

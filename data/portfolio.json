@@ -1,11 +1,13 @@
 {
   "total_capital": 3085500,
   "cash": 2583995,
+  "cash_usd": 4919.72,
   "margin_value": 1130400,
   "risk_pct": 0.005,
   "positions": [
     {
       "asset": "KODEX반도체",
+      "currency": "KRW",
       "shares": 4,
       "avg_price": 114366,
       "current_value": 0,
