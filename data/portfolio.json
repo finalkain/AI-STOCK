@@ -1,21 +1,10 @@
 {
   "total_capital": 3085500,
-  "cash": 2583995,
+  "cash": 3162575,
   "cash_usd": 4919.72,
   "margin_value": 1130400,
   "risk_pct": 0.005,
-  "positions": [
-    {
-      "asset": "KODEX반도체",
-      "currency": "KRW",
-      "shares": 4,
-      "avg_price": 114366,
-      "current_value": 0,
-      "trailing_stop": 121077,
-      "entry_date": "2026-04-18",
-      "note": "55일 돌파 신호 (시스템 첫 매수, 4/30 1주 추가매수)"
-    }
-  ],
+  "positions": [],
   "journal": [
     {
       "date": "2026-04-01",
@@ -49,6 +38,16 @@
       "price": 15550,
       "pnl": 32760,
       "reason": "전량 매도"
+    },
+    {
+      "date": "2026-05-15",
+      "action": "SELL ALL",
+      "asset": "KODEX반도체",
+      "currency": "KRW",
+      "shares": 4,
+      "price": 144645,
+      "pnl": 121116,
+      "reason": "전량 매도 (4주 × 144,645 - 평균 114,366 = +121,116원)"
     }
   ]
 }
