@@ -1,6 +1,6 @@
 {
   "total_capital": 3085500,
-  "cash": 3162575,
+  "cash": 3123775,
   "cash_usd": 4919.72,
   "margin_value": 1130400,
   "risk_pct": 0.005,
@@ -38,6 +38,35 @@
       "price": 15550,
       "pnl": 32760,
       "reason": "전량 매도"
+    },
+    {
+      "date": "2026-05-14",
+      "action": "BUY",
+      "asset": "TIGER구리실물",
+      "currency": "KRW",
+      "shares": 50,
+      "price": 17405,
+      "reason": "재진입 매수"
+    },
+    {
+      "date": "2026-05-15",
+      "action": "SELL",
+      "asset": "TIGER구리실물",
+      "currency": "KRW",
+      "shares": 48,
+      "price": 16630,
+      "pnl": -37200,
+      "reason": "전량매도 1차 체결 (48주 × 16,630, -775원/주)"
+    },
+    {
+      "date": "2026-05-15",
+      "action": "SELL ALL",
+      "asset": "TIGER구리실물",
+      "currency": "KRW",
+      "shares": 2,
+      "price": 16605,
+      "pnl": -1600,
+      "reason": "전량매도 2차 체결 (2주 × 16,605, -800원/주)"
     },
     {
       "date": "2026-05-15",

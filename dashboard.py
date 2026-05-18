@@ -1808,7 +1808,143 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
         with calc_tab4:
             st.markdown("##### 매매일지")
             journal = pf.get("journal", [])
-            if not journal:
+
+            edit_mode = st.toggle(
+                "편집 모드",
+                key="journal_edit_mode",
+                help="잘못된 매매를 직접 수정·삭제하거나 누락된 매매를 추가할 수 있습니다. "
+                     "행 변경 후 [변경 저장] 버튼을 눌러야 GitHub에 영속화됩니다.",
+            )
+
+            if edit_mode:
+                edit_rows = []
+                for e in journal:
+                    pnl_raw = e.get("pnl")
+                    edit_rows.append({
+                        "날짜": e.get("date", ""),
+                        "구분": e.get("action", "BUY"),
+                        "통화": e.get("currency") or detect_currency(e.get("asset", "")),
+                        "종목": e.get("asset", ""),
+                        "수량": int(e.get("shares", 0) or 0),
+                        "단가": float(e.get("price", 0) or 0),
+                        "손익": float(pnl_raw) if pnl_raw is not None else None,
+                        "사유": e.get("reason", ""),
+                    })
+                edit_df = pd.DataFrame(edit_rows) if edit_rows else pd.DataFrame(
+                    columns=["날짜", "구분", "통화", "종목", "수량", "단가", "손익", "사유"]
+                )
+
+                edited = st.data_editor(
+                    edit_df,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(max(len(edit_rows), 3) * 38 + 80, 480),
+                    column_config={
+                        "날짜": st.column_config.TextColumn(
+                            "날짜", required=True, help="YYYY-MM-DD"
+                        ),
+                        "구분": st.column_config.SelectboxColumn(
+                            "구분",
+                            options=["BUY", "ADD", "SELL", "SELL ALL"],
+                            required=True,
+                        ),
+                        "통화": st.column_config.SelectboxColumn(
+                            "통화", options=["KRW", "USD"], required=True
+                        ),
+                        "종목": st.column_config.TextColumn("종목", required=True),
+                        "수량": st.column_config.NumberColumn(
+                            "수량", min_value=0, step=1, format="%d"
+                        ),
+                        "단가": st.column_config.NumberColumn(
+                            "단가", min_value=0.0, step=0.01, format="%.2f"
+                        ),
+                        "손익": st.column_config.NumberColumn(
+                            "손익", format="%.2f", help="매도일 때만 입력"
+                        ),
+                        "사유": st.column_config.TextColumn("사유"),
+                    },
+                    key="journal_editor",
+                )
+
+                save_cols = st.columns([1, 4])
+                save_clicked = save_cols[0].button(
+                    "변경 저장", type="primary", key="journal_save_btn"
+                )
+                save_cols[1].caption(
+                    "⚠️ 단가·수량 등을 고치면 **현금/포지션은 자동 갱신되지 않습니다**. "
+                    "필요시 '매수/매도' 탭에서 별도 보정하세요."
+                )
+
+                if save_clicked:
+                    new_journal = []
+                    errors = []
+                    for idx, row in edited.iterrows():
+                        date_v = str(row.get("날짜") or "").strip()
+                        asset_v = str(row.get("종목") or "").strip()
+                        if not date_v and not asset_v:
+                            continue  # 빈 행 무시
+                        if not date_v or not asset_v:
+                            errors.append(f"행 {idx + 1}: 날짜·종목 모두 입력 필요")
+                            continue
+                        try:
+                            datetime.strptime(date_v, "%Y-%m-%d")
+                        except ValueError:
+                            errors.append(
+                                f"행 {idx + 1}: 날짜 형식 오류 (YYYY-MM-DD 필요) — '{date_v}'"
+                            )
+                            continue
+
+                        ccy_v = str(row.get("통화") or "KRW").strip()
+                        shares_v = int(row.get("수량") or 0)
+                        price_raw = float(row.get("단가") or 0)
+                        price_v = (
+                            int(round(price_raw))
+                            if ccy_v == "KRW" and price_raw == int(price_raw)
+                            else round(price_raw, 4)
+                        )
+                        pnl_v = row.get("손익")
+                        reason_v = str(row.get("사유") or "").strip()
+
+                        entry = {
+                            "date": date_v,
+                            "action": str(row.get("구분") or "BUY").strip(),
+                            "asset": asset_v,
+                            "currency": ccy_v,
+                            "shares": shares_v,
+                            "price": price_v,
+                        }
+                        if pnl_v is not None and pd.notna(pnl_v):
+                            entry["pnl"] = (
+                                int(round(float(pnl_v))) if ccy_v == "KRW"
+                                else round(float(pnl_v), 2)
+                            )
+                        if reason_v:
+                            entry["reason"] = reason_v
+                        new_journal.append(entry)
+
+                    if errors:
+                        for err in errors:
+                            st.error(err)
+                    else:
+                        new_journal.sort(key=lambda x: x.get("date", ""))
+                        pf["journal"] = new_journal
+                        ok = save_portfolio(
+                            pf,
+                            commit_msg=(
+                                f"Edit trade journal "
+                                f"({len(new_journal)}건, "
+                                f"{datetime.now().strftime('%Y-%m-%d %H:%M')})"
+                            ),
+                        )
+                        if ok:
+                            st.success(
+                                f"매매일지 저장 완료 ({len(new_journal)}건). "
+                                "GitHub에 커밋되었습니다."
+                            )
+                            st.rerun()
+
+            elif not journal:
                 st.caption("기록된 매매가 없습니다.")
             else:
                 rows = []
