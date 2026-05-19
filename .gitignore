@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .env
+.kiwoom_token_cache.json
 venv*/
 .claude/
 *.png

@@ -12,9 +12,10 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from backtest.data_loader import load_asset, load_yfinance, ASSET_REGISTRY
 from backtest.turtle_system import calc_atr
+import kiwoom_api
 
 # ── 인증 ──────────────────────────────────────────
 def check_password():
@@ -1808,6 +1809,238 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
         with calc_tab4:
             st.markdown("##### 매매일지")
             journal = pf.get("journal", [])
+
+            # ── 키움 REST API 자동 임포트 ─────────────
+            with st.expander("🔌 키움에서 매매내역 가져오기 (kt00007)"):
+                kw_cols = st.columns([1, 1, 1, 2])
+                today = datetime.now().date()
+                start_d = kw_cols[0].date_input(
+                    "시작일", value=today - timedelta(days=7),
+                    key="kiwoom_start_date",
+                )
+                end_d = kw_cols[1].date_input(
+                    "종료일", value=today,
+                    key="kiwoom_end_date",
+                )
+                fetch_btn = kw_cols[2].button(
+                    "조회", key="kiwoom_fetch_btn", type="secondary"
+                )
+                kw_cols[3].caption(
+                    "체결 데이터만 추출. 기존 매매일지와 (일자·종목·구분·수량·단가) "
+                    "동일하면 자동 제외됩니다."
+                )
+
+                def _norm_asset(s: str) -> str:
+                    return "".join((s or "").split()).lower()
+
+                if fetch_btn:
+                    if start_d > end_d:
+                        st.error("시작일이 종료일보다 늦습니다.")
+                    else:
+                        # 기존 journal 의 dedup 키 집합
+                        existing_keys = set()
+                        for e in journal:
+                            key = (
+                                e.get("date", ""),
+                                _norm_asset(e.get("asset", "")),
+                                str(e.get("action", "")).split()[0],  # SELL/BUY
+                                int(e.get("shares", 0) or 0),
+                                int(round(float(e.get("price", 0) or 0))),
+                            )
+                            existing_keys.add(key)
+
+                        # 종목명 정규화 → 포트폴리오 자산명 매핑
+                        pos_name_by_norm = {
+                            _norm_asset(p.get("asset", "")): p.get("asset", "")
+                            for p in pf.get("positions", [])
+                        }
+
+                        new_entries = []
+                        skipped = 0
+                        errors = []
+                        cur = start_d
+                        with st.spinner("키움 API 조회 중..."):
+                            while cur <= end_d:
+                                ymd = cur.strftime("%Y%m%d")
+                                try:
+                                    res = kiwoom_api.fetch_order_history_kt00007(ymd)
+                                except Exception as ex:
+                                    errors.append(f"{cur.isoformat()}: {ex}")
+                                    cur += timedelta(days=1)
+                                    continue
+                                if res.get("return_code") not in (0, "0", None):
+                                    errors.append(
+                                        f"{cur.isoformat()}: "
+                                        f"{res.get('return_msg', res)}"
+                                    )
+                                rows_res = res.get("acnt_ord_cntr_prps_dtl") or []
+                                for row in rows_res:
+                                    cntr_qty = int(row.get("cntr_qty", "0") or 0)
+                                    if cntr_qty <= 0:
+                                        continue
+                                    io_nm = row.get("io_tp_nm", "")
+                                    if "매수" in io_nm:
+                                        action = "BUY"
+                                    elif "매도" in io_nm:
+                                        action = "SELL"
+                                    else:
+                                        continue
+                                    raw_nm = row.get("stk_nm", "").strip()
+                                    norm_nm = _norm_asset(raw_nm)
+                                    asset_nm = pos_name_by_norm.get(norm_nm, raw_nm)
+                                    price = int(row.get("cntr_uv", "0") or 0)
+                                    date_str = cur.isoformat()
+                                    key = (date_str, norm_nm, action, cntr_qty, price)
+                                    if key in existing_keys:
+                                        skipped += 1
+                                        continue
+                                    existing_keys.add(key)
+                                    new_entries.append({
+                                        "date": date_str,
+                                        "action": action,
+                                        "asset": asset_nm,
+                                        "currency": "KRW",
+                                        "shares": cntr_qty,
+                                        "price": price,
+                                        "reason": "키움 자동 임포트",
+                                        "kiwoom_ord_no": row.get("ord_no", ""),
+                                        "kiwoom_stk_cd": row.get("stk_cd", ""),
+                                    })
+                                cur += timedelta(days=1)
+
+                        for err in errors:
+                            st.warning(err)
+                        st.session_state["kiwoom_new_entries"] = new_entries
+                        st.session_state["kiwoom_skipped"] = skipped
+
+                # 미리보기 + 확정 버튼
+                preview = st.session_state.get("kiwoom_new_entries")
+                if preview is not None:
+                    skipped = st.session_state.get("kiwoom_skipped", 0)
+                    if not preview:
+                        st.info(
+                            f"새로 추가할 체결 없음 (기존 일치 {skipped}건 제외)."
+                        )
+                    else:
+                        st.success(
+                            f"신규 {len(preview)}건 / 기존 일치 {skipped}건 제외"
+                        )
+                        prev_df = pd.DataFrame([
+                            {
+                                "날짜": e["date"],
+                                "구분": e["action"],
+                                "종목": e["asset"],
+                                "수량": e["shares"],
+                                "단가": f"{e['price']:,}원",
+                                "주문번호": e.get("kiwoom_ord_no", ""),
+                            }
+                            for e in preview
+                        ])
+                        st.dataframe(
+                            prev_df, use_container_width=True, hide_index=True,
+                            height=min(len(preview) * 38 + 40, 300),
+                        )
+                        confirm = st.button(
+                            f"✅ {len(preview)}건 매매일지에 추가 + GitHub 커밋",
+                            type="primary", key="kiwoom_confirm_btn",
+                        )
+                        if confirm:
+                            pf["journal"].extend(preview)
+                            pf["journal"].sort(key=lambda x: x.get("date", ""))
+                            ok = save_portfolio(
+                                pf,
+                                commit_msg=(
+                                    f"Import {len(preview)} kiwoom trades "
+                                    f"({preview[0]['date']}~{preview[-1]['date']})"
+                                ),
+                            )
+                            if ok:
+                                st.session_state.pop("kiwoom_new_entries", None)
+                                st.session_state.pop("kiwoom_skipped", None)
+                                st.success(
+                                    f"{len(preview)}건 매매일지에 추가되었습니다."
+                                )
+                                st.rerun()
+
+            # ── 키움 잔고 자동 동기화 (kt00018) ─────────────
+            with st.expander("🔌 키움 잔고 동기화 (kt00018)"):
+                bal_cols = st.columns([1, 4])
+                bal_fetch = bal_cols[0].button(
+                    "잔고 조회", key="kiwoom_balance_fetch", type="secondary"
+                )
+                bal_cols[1].caption(
+                    "키움 예수금(원화)을 조회해 portfolio.json 의 `cash` 와 비교합니다. "
+                    "보유 종목은 raw 응답으로 표시되며 자동 갱신하지 않습니다 "
+                    "(positions 매핑은 수동 확인 필요). "
+                    "**USD 자산은 키움 REST API가 국내주식 전용이라 미지원** — "
+                    "`cash_usd` 는 수기 입력 유지."
+                )
+
+                if bal_fetch:
+                    try:
+                        with st.spinner("키움 API 조회 중..."):
+                            bal_res = kiwoom_api.fetch_balance_kt00018()
+                        st.session_state["kiwoom_balance_res"] = bal_res
+                    except Exception as ex:
+                        st.error(f"키움 잔고 조회 실패: {ex}")
+
+                bal_res = st.session_state.get("kiwoom_balance_res")
+                if bal_res is not None:
+                    if bal_res.get("return_code") not in (0, "0", None):
+                        st.error(f"키움 응답 오류: {bal_res.get('return_msg', bal_res)}")
+                    else:
+                        try:
+                            cash_kiwoom = int(bal_res.get("prsm_dpst_aset_amt", "0") or 0)
+                        except (TypeError, ValueError):
+                            cash_kiwoom = 0
+                        cash_cur = int(pf.get("cash", 0) or 0)
+                        delta = cash_kiwoom - cash_cur
+
+                        mcols = st.columns(3)
+                        mcols[0].metric("키움 예수금", f"{cash_kiwoom:,}원")
+                        mcols[1].metric("현재 portfolio.cash", f"{cash_cur:,}원")
+                        mcols[2].metric(
+                            "차이",
+                            f"{delta:+,}원",
+                            delta_color="off" if delta == 0 else "normal",
+                        )
+
+                        if delta == 0:
+                            st.success("일치합니다. 갱신 불필요.")
+                        else:
+                            sync_btn = st.button(
+                                f"✅ portfolio.cash 를 {cash_kiwoom:,}원 으로 갱신 + 커밋",
+                                key="kiwoom_balance_sync", type="primary",
+                            )
+                            if sync_btn:
+                                pf["cash"] = cash_kiwoom
+                                ok = save_portfolio(
+                                    pf,
+                                    commit_msg=(
+                                        f"Sync KRW cash from Kiwoom: "
+                                        f"{cash_cur:,} → {cash_kiwoom:,} "
+                                        f"({delta:+,})"
+                                    ),
+                                )
+                                if ok:
+                                    st.session_state.pop(
+                                        "kiwoom_balance_res", None
+                                    )
+                                    st.success("현금 동기화 완료.")
+                                    st.rerun()
+
+                        # 평가내역 raw (보유 종목 자동 갱신은 미구현)
+                        holdings = bal_res.get("acnt_evlt_remn_indv_tot") or []
+                        st.markdown(
+                            f"**키움 보유 종목 {len(holdings)}개** (raw, 자동 반영 안 함)"
+                        )
+                        if holdings:
+                            st.json(holdings, expanded=False)
+                            st.caption(
+                                "⚠️ 키움 보유 종목과 portfolio.positions 매핑은 "
+                                "현재 수동입니다. 수량/평균단가가 다르면 매매일지 "
+                                "탭에서 직접 정정하세요."
+                            )
 
             edit_mode = st.toggle(
                 "편집 모드",
