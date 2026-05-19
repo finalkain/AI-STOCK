@@ -25,13 +25,27 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+
+def _get_secret(key: str) -> str | None:
+    """os.environ → streamlit secrets 순으로 조회 (Cloud 호환)."""
+    val = os.getenv(key)
+    if val:
+        return val.strip()
+    try:
+        import streamlit as st
+        if key in st.secrets:
+            return str(st.secrets[key]).strip()
+    except Exception:
+        pass
+    return None
+
 REAL_HOST = "https://api.kiwoom.com"
 MOCK_HOST = "https://mockapi.kiwoom.com"
 TOKEN_CACHE = Path(__file__).parent / ".kiwoom_token_cache.json"
 
 
 def _is_mock() -> bool:
-    return os.getenv("KIWOOM_IS_MOCK", "false").strip().lower() == "true"
+    return (_get_secret("KIWOOM_IS_MOCK") or "false").strip().lower() == "true"
 
 
 def _host() -> str:
@@ -49,14 +63,17 @@ class KiwoomConfig:
     def from_env(cls) -> "KiwoomConfig":
         missing = [
             k for k in ("KIWOOM_APP_KEY", "KIWOOM_SECRET_KEY", "KIWOOM_ACCOUNT_NO")
-            if not os.getenv(k)
+            if not _get_secret(k)
         ]
         if missing:
-            raise RuntimeError(f".env 에 누락된 키: {missing}")
+            raise RuntimeError(
+                f"키움 인증 키 누락: {missing}. "
+                "로컬: .env 파일, Cloud: Streamlit Secrets 에 추가하세요."
+            )
         return cls(
-            app_key=os.environ["KIWOOM_APP_KEY"].strip(),
-            secret_key=os.environ["KIWOOM_SECRET_KEY"].strip(),
-            account_no=os.environ["KIWOOM_ACCOUNT_NO"].strip(),
+            app_key=_get_secret("KIWOOM_APP_KEY"),
+            secret_key=_get_secret("KIWOOM_SECRET_KEY"),
+            account_no=_get_secret("KIWOOM_ACCOUNT_NO"),
             is_mock=_is_mock(),
         )
 

@@ -1972,8 +1972,9 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                     "키움 예수금(원화)을 조회해 portfolio.json 의 `cash` 와 비교합니다. "
                     "보유 종목은 raw 응답으로 표시되며 자동 갱신하지 않습니다 "
                     "(positions 매핑은 수동 확인 필요). "
-                    "**USD 자산은 키움 REST API가 국내주식 전용이라 미지원** — "
-                    "`cash_usd` 는 수기 입력 유지."
+                    "**🇺🇸 미국 주식 계좌(`KIWOOM_OVERSEAS_ACCOUNT_NO`)는 키움 REST API가 "
+                    "국내주식(ETF/ETN 포함) 전용이라 자동 동기화 불가** — "
+                    "`cash_usd` 와 USD 포지션은 수기 입력 유지."
                 )
 
                 if bal_fetch:
