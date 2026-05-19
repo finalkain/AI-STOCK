@@ -212,14 +212,19 @@ def save_portfolio(pf, commit_msg=None):
 
 
 def _save_to_github(pf, commit_msg):
-    """GitHub Contents API 로 data/portfolio.json 을 커밋한다."""
+    """portfolio.json GitHub 커밋 (하위호환)."""
+    body = json.dumps(pf, ensure_ascii=False, indent=2)
+    return _save_file_to_github("data/portfolio.json", body, commit_msg)
+
+
+def _save_file_to_github(path: str, body: str, commit_msg: str) -> bool:
+    """GitHub Contents API 로 임의 파일을 커밋한다."""
     import base64
     import requests as _req
 
     token = st.secrets.get("github_token", "")
     repo = st.secrets.get("github_repo", "")
     branch = st.secrets.get("github_branch", "main")
-    path = "data/portfolio.json"
 
     if not token or not repo:
         st.warning(
@@ -243,7 +248,6 @@ def _save_to_github(pf, commit_msg):
         st.error(f"GitHub SHA 조회 실패: {e}")
         return False
 
-    body = json.dumps(pf, ensure_ascii=False, indent=2)
     payload = {
         "message": commit_msg,
         "content": base64.b64encode(body.encode("utf-8")).decode("ascii"),
@@ -256,11 +260,47 @@ def _save_to_github(pf, commit_msg):
         r = _req.put(api, headers=headers, json=payload, timeout=15)
         if r.status_code in (200, 201):
             return True
-        st.error(f"GitHub 저장 실패: HTTP {r.status_code} — {r.text[:200]}")
+        st.error(f"GitHub 저장 실패 ({path}): HTTP {r.status_code} — {r.text[:200]}")
         return False
     except Exception as e:
-        st.error(f"GitHub 저장 실패: {e}")
+        st.error(f"GitHub 저장 실패 ({path}): {e}")
         return False
+
+
+# ── 키움 잔고 캐시 (로컬 스캔 → 모든 환경에서 조회) ──
+KIWOOM_BALANCE_CACHE = Path(__file__).parent / "data" / "kiwoom_balance_cache.json"
+
+
+def load_kiwoom_balance_cache() -> dict | None:
+    if not KIWOOM_BALANCE_CACHE.exists():
+        return None
+    try:
+        return json.loads(KIWOOM_BALANCE_CACHE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def save_kiwoom_balance_cache(cache: dict, commit_msg: str | None = None) -> bool:
+    try:
+        os.makedirs(KIWOOM_BALANCE_CACHE.parent, exist_ok=True)
+        KIWOOM_BALANCE_CACHE.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        st.error(f"잔고 캐시 로컬 저장 실패: {e}")
+        return False
+    if commit_msg:
+        body = json.dumps(cache, ensure_ascii=False, indent=2)
+        return _save_file_to_github(
+            "data/kiwoom_balance_cache.json", body, commit_msg
+        )
+    return True
+
+
+def _is_kiwoom_ip_block(msg_or_obj) -> bool:
+    s = str(msg_or_obj)
+    return "8050" in s or "지정단말기" in s
 
 
 def calc_rs(data):
@@ -1810,8 +1850,12 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
             st.markdown("##### 매매일지")
             journal = pf.get("journal", [])
 
-            # ── 키움 REST API 자동 임포트 ─────────────
-            with st.expander("🔌 키움에서 매매내역 가져오기 (kt00007)"):
+            # ── 키움 REST API 자동 임포트 (로컬 PC 전용) ─────
+            with st.expander("🔌 키움에서 매매내역 가져오기 (kt00007, 로컬 PC 전용)"):
+                st.caption(
+                    "⚠️ 키움 REST API 는 등록된 IP 만 호출 가능 — "
+                    "**Cloud 에서는 8050 에러로 차단**. 로컬 PC 에서만 사용 가능합니다."
+                )
                 kw_cols = st.columns([1, 1, 1, 2])
                 today = datetime.now().date()
                 start_d = kw_cols[0].date_input(
@@ -1865,10 +1909,35 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                                 try:
                                     res = kiwoom_api.fetch_order_history_kt00007(ymd)
                                 except Exception as ex:
+                                    if _is_kiwoom_ip_block(ex):
+                                        st.error(
+                                            "🚫 키움 IP 정책 차단 (8050: 지정단말기 인증). "
+                                            "**Cloud 에서는 동작하지 않습니다.** "
+                                            "로컬 PC 에서 실행해주세요."
+                                        )
+                                        st.session_state.pop(
+                                            "kiwoom_new_entries", None
+                                        )
+                                        st.session_state.pop(
+                                            "kiwoom_skipped", None
+                                        )
+                                        st.stop()
                                     errors.append(f"{cur.isoformat()}: {ex}")
                                     cur += timedelta(days=1)
                                     continue
                                 if res.get("return_code") not in (0, "0", None):
+                                    if _is_kiwoom_ip_block(res):
+                                        st.error(
+                                            "🚫 키움 IP 정책 차단 (8050). "
+                                            "로컬 PC 에서 실행해주세요."
+                                        )
+                                        st.session_state.pop(
+                                            "kiwoom_new_entries", None
+                                        )
+                                        st.session_state.pop(
+                                            "kiwoom_skipped", None
+                                        )
+                                        st.stop()
                                     errors.append(
                                         f"{cur.isoformat()}: "
                                         f"{res.get('return_msg', res)}"
@@ -1962,86 +2031,130 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                                 )
                                 st.rerun()
 
-            # ── 키움 잔고 자동 동기화 (kt00018) ─────────────
-            with st.expander("🔌 키움 잔고 동기화 (kt00018)"):
-                bal_cols = st.columns([1, 4])
-                bal_fetch = bal_cols[0].button(
-                    "잔고 조회", key="kiwoom_balance_fetch", type="secondary"
-                )
-                bal_cols[1].caption(
-                    "키움 예수금(원화)을 조회해 portfolio.json 의 `cash` 와 비교합니다. "
-                    "보유 종목은 raw 응답으로 표시되며 자동 갱신하지 않습니다 "
-                    "(positions 매핑은 수동 확인 필요). "
-                    "**🇺🇸 미국 주식 계좌(`KIWOOM_OVERSEAS_ACCOUNT_NO`)는 키움 REST API가 "
-                    "국내주식(ETF/ETN 포함) 전용이라 자동 동기화 불가** — "
+            # ── 키움 잔고 (kt00018) — 로컬 스캔, 모든 환경 조회 ─────────
+            with st.expander("🔌 키움 잔고 (kt00018)"):
+                st.caption(
+                    "⚠️ 키움 REST API 는 등록된 IP 만 호출 가능합니다 "
+                    "(에러 8050: 지정단말기 인증). **재조회는 로컬 PC 에서만 동작**하며, "
+                    "조회 결과는 GitHub 에 캐시되어 Cloud·다른 PC 에서도 그대로 볼 수 있습니다. "
+                    "🇺🇸 미국 주식 계좌는 키움 REST API 가 국내주식 전용이라 미지원 — "
                     "`cash_usd` 와 USD 포지션은 수기 입력 유지."
                 )
 
-                if bal_fetch:
+                bal_cache = load_kiwoom_balance_cache()
+
+                if bal_cache:
+                    cash_kiwoom = int(bal_cache.get("cash_krw", 0) or 0)
+                    cash_cur = int(pf.get("cash", 0) or 0)
+                    delta = cash_kiwoom - cash_cur
+                    fetched_at = bal_cache.get("fetched_at", "?")
+
+                    st.markdown(f"**마지막 조회:** `{fetched_at}`")
+                    mcols = st.columns(3)
+                    mcols[0].metric("키움 예수금", f"{cash_kiwoom:,}원")
+                    mcols[1].metric("portfolio.cash", f"{cash_cur:,}원")
+                    mcols[2].metric(
+                        "차이",
+                        f"{delta:+,}원",
+                        delta_color="off" if delta == 0 else "normal",
+                    )
+
+                    if delta == 0:
+                        st.success("일치합니다. 갱신 불필요.")
+                    else:
+                        sync_btn = st.button(
+                            f"✅ portfolio.cash 를 {cash_kiwoom:,}원 으로 갱신 + 커밋",
+                            key="kiwoom_balance_sync", type="primary",
+                        )
+                        if sync_btn:
+                            pf["cash"] = cash_kiwoom
+                            ok = save_portfolio(
+                                pf,
+                                commit_msg=(
+                                    f"Sync KRW cash from Kiwoom: "
+                                    f"{cash_cur:,} → {cash_kiwoom:,} ({delta:+,})"
+                                ),
+                            )
+                            if ok:
+                                st.success("현금 동기화 완료.")
+                                st.rerun()
+
+                    holdings = bal_cache.get("holdings", []) or []
+                    st.markdown(
+                        f"**키움 보유 종목 {len(holdings)}개** (raw, 자동 반영 안 함)"
+                    )
+                    if holdings:
+                        st.json(holdings, expanded=False)
+                        st.caption(
+                            "⚠️ 키움 보유 종목과 portfolio.positions 매핑은 "
+                            "현재 수동입니다. 수량/평균단가가 다르면 매매일지 "
+                            "탭에서 직접 정정하세요."
+                        )
+                else:
+                    st.info(
+                        "아직 한 번도 조회되지 않았습니다. "
+                        "로컬 PC 에서 아래 '키움 재조회' 버튼을 눌러주세요."
+                    )
+
+                st.divider()
+                refetch = st.button(
+                    "🔄 키움 재조회 (로컬 PC 전용)",
+                    key="kiwoom_balance_fetch", type="secondary",
+                )
+                if refetch:
+                    err_text = None
+                    bal_res = None
                     try:
                         with st.spinner("키움 API 조회 중..."):
                             bal_res = kiwoom_api.fetch_balance_kt00018()
-                        st.session_state["kiwoom_balance_res"] = bal_res
                     except Exception as ex:
-                        st.error(f"키움 잔고 조회 실패: {ex}")
+                        err_text = str(ex)
 
-                bal_res = st.session_state.get("kiwoom_balance_res")
-                if bal_res is not None:
-                    if bal_res.get("return_code") not in (0, "0", None):
-                        st.error(f"키움 응답 오류: {bal_res.get('return_msg', bal_res)}")
+                    if err_text:
+                        if _is_kiwoom_ip_block(err_text):
+                            st.error(
+                                "🚫 키움 IP 정책 차단 (8050: 지정단말기 인증). "
+                                "**Streamlit Cloud 에서는 동작하지 않습니다.** "
+                                "로컬 PC 에서 `streamlit run dashboard.py` 로 "
+                                "실행해 주세요."
+                            )
+                        else:
+                            st.error(f"키움 잔고 조회 실패: {err_text}")
+                    elif bal_res.get("return_code") not in (0, "0", None):
+                        if _is_kiwoom_ip_block(bal_res):
+                            st.error(
+                                "🚫 키움 IP 정책 차단 (8050). 로컬 PC 에서 실행해주세요."
+                            )
+                        else:
+                            st.error(
+                                f"키움 응답 오류: {bal_res.get('return_msg', bal_res)}"
+                            )
                     else:
                         try:
-                            cash_kiwoom = int(bal_res.get("prsm_dpst_aset_amt", "0") or 0)
+                            cash_krw = int(
+                                bal_res.get("prsm_dpst_aset_amt", "0") or 0
+                            )
                         except (TypeError, ValueError):
-                            cash_kiwoom = 0
-                        cash_cur = int(pf.get("cash", 0) or 0)
-                        delta = cash_kiwoom - cash_cur
-
-                        mcols = st.columns(3)
-                        mcols[0].metric("키움 예수금", f"{cash_kiwoom:,}원")
-                        mcols[1].metric("현재 portfolio.cash", f"{cash_cur:,}원")
-                        mcols[2].metric(
-                            "차이",
-                            f"{delta:+,}원",
-                            delta_color="off" if delta == 0 else "normal",
+                            cash_krw = 0
+                        cache_new = {
+                            "fetched_at": datetime.now().isoformat(timespec="seconds"),
+                            "is_mock": kiwoom_api._is_mock(),
+                            "cash_krw": cash_krw,
+                            "holdings": bal_res.get("acnt_evlt_remn_indv_tot") or [],
+                            "raw": bal_res,
+                        }
+                        ok = save_kiwoom_balance_cache(
+                            cache_new,
+                            commit_msg=(
+                                f"Sync kiwoom balance cache "
+                                f"(cash {cash_krw:,}원, "
+                                f"holdings {len(cache_new['holdings'])}개, "
+                                f"{cache_new['fetched_at']})"
+                            ),
                         )
-
-                        if delta == 0:
-                            st.success("일치합니다. 갱신 불필요.")
-                        else:
-                            sync_btn = st.button(
-                                f"✅ portfolio.cash 를 {cash_kiwoom:,}원 으로 갱신 + 커밋",
-                                key="kiwoom_balance_sync", type="primary",
-                            )
-                            if sync_btn:
-                                pf["cash"] = cash_kiwoom
-                                ok = save_portfolio(
-                                    pf,
-                                    commit_msg=(
-                                        f"Sync KRW cash from Kiwoom: "
-                                        f"{cash_cur:,} → {cash_kiwoom:,} "
-                                        f"({delta:+,})"
-                                    ),
-                                )
-                                if ok:
-                                    st.session_state.pop(
-                                        "kiwoom_balance_res", None
-                                    )
-                                    st.success("현금 동기화 완료.")
-                                    st.rerun()
-
-                        # 평가내역 raw (보유 종목 자동 갱신은 미구현)
-                        holdings = bal_res.get("acnt_evlt_remn_indv_tot") or []
-                        st.markdown(
-                            f"**키움 보유 종목 {len(holdings)}개** (raw, 자동 반영 안 함)"
-                        )
-                        if holdings:
-                            st.json(holdings, expanded=False)
-                            st.caption(
-                                "⚠️ 키움 보유 종목과 portfolio.positions 매핑은 "
-                                "현재 수동입니다. 수량/평균단가가 다르면 매매일지 "
-                                "탭에서 직접 정정하세요."
-                            )
+                        if ok:
+                            st.success("잔고 캐시 저장 + GitHub 커밋 완료.")
+                            st.rerun()
 
             edit_mode = st.toggle(
                 "편집 모드",
