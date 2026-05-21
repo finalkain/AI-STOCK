@@ -247,6 +247,22 @@ NEXTDAY_RECENT_BREAKOUT_MAX = 3     # 최근 돌파 ≤ 3일
 NEXTDAY_PIVOT_PULLBACK_MAX = 1.5    # 피벗 +1.5% 이내 눌림
 NEXTDAY_CLOSE_STRENGTH_MIN = 0.5    # 일중 종가 강도 ≥ 0.5
 
+# ── 확장(추격 금지) 판정 임계값 ───────────────────
+# 피벗(돌파선)에는 근접해 보여도 50일선에서 멀어졌거나 당일 급등한 종목은
+# 추격 매수 시 통계적으로 눌림을 맞을 확률이 높음 → 매수 구간을 눌림대로 제시
+EXT_MA50_CLIMAX = 10.0              # 50일선 대비 +10% 초과 → 확장 구간
+DAY_SPIKE_CLIMAX = 8.0             # 당일 등락 +8% 초과 → 급등 봉
+BUY_ZONE_MAX_RISK = 8.0            # 매수 구간 손절 최대 손실 % (ATR 과대 종목 가드)
+
+# ── 돌파 수평선(피벗) / 예약 매수 ─────────────────
+# 목적: 돌파 가격선을 미리 잡고 그 가격에 예약 매수를 걸어 급등 전 선취
+PIVOT_LOOKBACK = 22                # 피벗 탐색 구간 (≈1개월 = 최근 베이스의 저항)
+PIVOT_LAG = 3                      # 최근 N봉 제외 — 당일 급등이 피벗을 끌어올리지 않게
+RESERVE_BUFFER = 0.003             # 예약 매수가 = 피벗 ×(1+0.3%) — 진짜 돌파에만 체결
+RESERVE_GAP_MIN = -13.0            # 피벗 아래 13% 이내여야 예약 후보 (베이스 — 급락 제외)
+RESERVE_GAP_MAX = -0.5             # 피벗 아래 0.5%까지 — 아직 미돌파 = 돌파 대기
+BREAKOUT_DONE_GAP = 4.0            # 피벗 +4% 초과 → 돌파 완료(예약 시점 지남)
+
 
 @dataclass
 class StockScore:
@@ -279,6 +295,17 @@ class StockScore:
     days_since_breakout: int = 999              # 마지막 55일 신고가 이후 경과일
     close_strength: float = 0.5                 # (close - low)/(high - low) — 일중 종가 강도
     gap_absorbed: bool = False                  # 갭상승 후 종가가 시가 아래 (흡수 패턴)
+    # ── 매수 적정가 / 확장 판정 ──────────────────
+    ma10: float = 0.0                           # 10일 이동평균
+    ma20: float = 0.0                           # 20일 이동평균
+    ma50: float = 0.0                           # 50일 이동평균
+    breakout_level: float = 0.0                 # 피벗(돌파선) 가격
+    ext_from_ma50: float = 0.0                  # 50일선 대비 현재가 괴리 %
+    day_change_pct: float = 0.0                 # 당일 등락률 % (갭과 별개)
+    # ── 돌파 수평선(피벗) / 예약 매수 ────────────
+    pivot_line: float = 0.0                     # 돌파 수평선 = 최근 베이스 저항 고가
+    base_low: float = 0.0                       # 베이스 저점 (손절 참고)
+    pivot_gap_pct: float = 0.0                  # 피벗 대비 현재가 % (음수=미돌파)
 
     @property
     def signal(self):
@@ -434,6 +461,103 @@ class StockScore:
             reasons.append(f"갭 +{self.gap_pct:.1f}% 흡수")
         return " · ".join(reasons)
 
+    # ── 매수 적정가 / 확장 판정 ──────────────────
+    @property
+    def is_extended(self):
+        """50일선에서 과도하게 확장됐거나 당일 급등 — 추격 매수 부적합.
+        피벗(extended_pct)이 +2% 이내여도, 50일선 +10% 초과 또는 당일 +8%
+        초과면 climax 구간으로 보고 추격을 막는다."""
+        return (self.ext_from_ma50 > EXT_MA50_CLIMAX
+                or self.day_change_pct > DAY_SPIKE_CLIMAX)
+
+    @property
+    def extension_reason(self):
+        """확장으로 판정된 근거 (UI 노출용)"""
+        why = []
+        if self.ext_from_ma50 > EXT_MA50_CLIMAX:
+            why.append(f"50일선 +{self.ext_from_ma50:.0f}%")
+        if self.day_change_pct > DAY_SPIKE_CLIMAX:
+            why.append(f"당일 +{self.day_change_pct:.0f}%")
+        return " · ".join(why)
+
+    @property
+    def buy_zone(self):
+        """권장 매수 구간 (low, high).
+        확장 종목: 10~20일선 눌림 구간 대기 (현재가 위로는 제시하지 않음).
+        정상 종목: 피벗(돌파선) ~ +2% 이내."""
+        if self.is_extended and self.ma10 > 0 and self.ma20 > 0:
+            ma_lo, ma_hi = min(self.ma10, self.ma20), max(self.ma10, self.ma20)
+            # 추격가를 제시하지 않도록 매수 구간 상단을 현재가로 제한
+            hi = min(ma_hi, self.price)
+            lo = min(ma_lo, hi)
+            return (lo, hi)
+        base = self.breakout_level if self.breakout_level > 0 else self.price
+        return (base, base * 1.02)
+
+    @property
+    def buy_zone_stop(self):
+        """매수 구간 하단 기준 손절가 — 2×ATR 아래.
+        ATR이 큰 고변동성 종목은 2×ATR 손절이 과대(-15%+)해지므로
+        최대 손실을 BUY_ZONE_MAX_RISK%로 제한한다."""
+        lo = self.buy_zone[0]
+        atr_stop = lo - 2 * self.atr20
+        risk_cap_stop = lo * (1 - BUY_ZONE_MAX_RISK / 100)
+        return max(atr_stop, risk_cap_stop)
+
+    @property
+    def buy_zone_risk_pct(self):
+        """매수 구간 중앙값 대비 손절 거리 %"""
+        lo, hi = self.buy_zone
+        mid = (lo + hi) / 2
+        return (mid - self.buy_zone_stop) / mid * 100 if mid > 0 else 0.0
+
+    # ── 돌파 예약 매수 (피벗 기반 일관 규칙) ──────
+    @property
+    def reserve_buy_price(self):
+        """돌파 예약 매수가 — 피벗(저항선) 바로 위.
+        진짜 돌파에만 체결되도록 RESERVE_BUFFER만큼 위에 건다."""
+        if self.pivot_line > 0:
+            return self.pivot_line * (1 + RESERVE_BUFFER)
+        return self.price
+
+    @property
+    def reserve_stop(self):
+        """예약 매수가 기준 손절 — 2×ATR 아래, 최대 손실 BUY_ZONE_MAX_RISK% 제한.
+        베이스 저점이 그보다 가까우면(타이트) 저점을 손절로 채택."""
+        rp = self.reserve_buy_price
+        stop = max(rp - 2 * self.atr20, rp * (1 - BUY_ZONE_MAX_RISK / 100))
+        if 0 < stop < self.base_low < rp:
+            stop = self.base_low
+        return stop
+
+    @property
+    def reserve_risk_pct(self):
+        """예약 매수가 대비 손절 거리 %"""
+        rp = self.reserve_buy_price
+        return (rp - self.reserve_stop) / rp * 100 if rp > 0 else 0.0
+
+    @property
+    def breakout_state(self):
+        """돌파 대기 / 돌파 진행 / 돌파 완료 — 피벗 대비 위치로 일관 판정.
+        (확장 여부는 별도 축 — UI에서 is_extended로 추격 금지를 먼저 처리)"""
+        if self.pivot_gap_pct > BREAKOUT_DONE_GAP:
+            return "돌파 완료"
+        if self.pivot_gap_pct < RESERVE_GAP_MAX:
+            return "돌파 대기"
+        return "돌파 진행"
+
+    @property
+    def is_reserve_candidate(self):
+        """돌파 대기 — 피벗 아래 베이스에서 예약 매수를 미리 설정할 수 있는 종목.
+        추세(stage2)·유동성·공시 OK + 피벗 아래 적정 거리 + 변동성/확장 과대 아님.
+        (피벗 아래라 아직 미돌파 → 당일 급등(is_extended)은 결격 사유 아님)"""
+        return (self.stage2
+                and self.liquidity_ok
+                and self.disclosure_ok
+                and self.ext_from_ma50 <= 20.0
+                and RESERVE_GAP_MIN <= self.pivot_gap_pct <= RESERVE_GAP_MAX
+                and self.atr_pct <= B_ATR_MAX)
+
     @property
     def filter_status(self):
         """필터 통과 상태를 한 줄로 — UI/디버깅용"""
@@ -464,6 +588,7 @@ class SectorResult:
     rs: float
     rank: int
     leaders: list = field(default_factory=list)  # list[StockScore]
+    reserve: list = field(default_factory=list)  # 돌파 대기 — 예약 매수 후보
 
 
 def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
@@ -485,9 +610,12 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
 
         is_kr = ticker.endswith(".KS") or ticker.endswith(".KQ")
 
+        ma10 = np.mean(c[-10:])
+        ma20 = np.mean(c[-20:])
         ma50 = np.mean(c[-50:])
         ma150 = np.mean(c[-150:])
         ma200 = np.mean(c[-200:])
+        ext_from_ma50 = ((price - ma50) / ma50 * 100) if ma50 > 0 else 0.0
 
         atr_arr = calc_atr(h, l, c, 20)
         atr20 = atr_arr[-1] if not np.isnan(atr_arr[-1]) else 0
@@ -508,6 +636,8 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
 
         # 갭상승 (오늘 시가 vs 전일 종가)
         gap_pct = ((o[-1] - c[-2]) / c[-2] * 100) if len(c) >= 2 and c[-2] > 0 else 0.0
+        # 당일 등락률 (종가 vs 전일 종가) — 갭이 작아도 장중 급등을 포착
+        day_change_pct = ((c[-1] - c[-2]) / c[-2] * 100) if len(c) >= 2 and c[-2] > 0 else 0.0
 
         stage2 = price > ma50 > ma150 > ma200
 
@@ -520,6 +650,20 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
         breakout_level = high_55 if brk55 else (high_20 if brk20 else price)
         extended_pct = ((price - breakout_level) / breakout_level * 100
                         if breakout_level > 0 else 0)
+
+        # ── 돌파 수평선(피벗) — 최근 베이스의 저항 고가 ──
+        # 최근 PIVOT_LAG봉을 제외해, 당일 급등이 피벗을 끌어올리지 않게 한다.
+        # 미돌파 종목도 동일 규칙으로 피벗을 잡아 예약 매수가를 산출할 수 있다.
+        if len(h) > PIVOT_LOOKBACK + PIVOT_LAG:
+            pv_hi = h[-(PIVOT_LOOKBACK + PIVOT_LAG):-PIVOT_LAG]
+            pv_lo = l[-(PIVOT_LOOKBACK + PIVOT_LAG):-PIVOT_LAG]
+        else:
+            pv_hi = h[:-PIVOT_LAG] if len(h) > PIVOT_LAG else h
+            pv_lo = l[:-PIVOT_LAG] if len(l) > PIVOT_LAG else l
+        pivot_line = float(np.max(pv_hi)) if len(pv_hi) else price
+        base_low = float(np.min(pv_lo)) if len(pv_lo) else price
+        pivot_gap_pct = ((price - pivot_line) / pivot_line * 100
+                         if pivot_line > 0 else 0.0)
 
         # ── 다음날 후보 보조 지표 ─────────────────
         # 1) 마지막 55일 신고가 이후 경과일
@@ -610,6 +754,15 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None):
             days_since_breakout=days_since_breakout,
             close_strength=round(close_strength, 2),
             gap_absorbed=gap_absorbed,
+            ma10=float(ma10),
+            ma20=float(ma20),
+            ma50=float(ma50),
+            breakout_level=float(breakout_level),
+            ext_from_ma50=round(ext_from_ma50, 1),
+            day_change_pct=round(day_change_pct, 1),
+            pivot_line=pivot_line,
+            base_low=base_low,
+            pivot_gap_pct=round(pivot_gap_pct, 1),
         )
     except Exception:
         return None
@@ -694,11 +847,19 @@ def scan_sectors(top_n=4, leaders_per_sector=3, progress_callback=None,
 
         leaders.sort(key=lambda x: x.score, reverse=True)
 
+        # 돌파 대기 — 예약 매수 후보 (피벗 아래 베이스, 아직 미돌파)
+        reserve = sorted(
+            [s for s in leaders if s.is_reserve_candidate],
+            key=lambda x: (x.pivot_gap_pct, -x.score),  # 피벗에 가까운 순
+            reverse=True,
+        )
+
         results.append(SectorResult(
             name=sector_name,
             rs=rs,
             rank=rank,
             leaders=leaders[:leaders_per_sector],
+            reserve=reserve[:12],
         ))
 
     return results, sector_scores

@@ -6,6 +6,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import json
+import time
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -355,6 +356,108 @@ def analyze(name, data):
         "near_high": near_high, "regime": regime, "alignment": alignment,
         "s1": s1, "s2": s2, "signal": signal, "rs": calc_rs(data),
     }
+
+
+# ── 돌파 예약 매수 계획 (피벗 기준 일관 규칙) ──────────
+def breakout_plan_html(s):
+    """StockScore → 돌파 예약 매수 계획 HTML 한 줄.
+    돌파 대기 → 예약 매수가 / 돌파 진행 → 라인 부근 / 돌파 완료·확장 → 추격 금지."""
+    s_ccy = "KRW" if s.is_kr else "USD"
+    # 추격 금지는 '피벗 위에서 확장된' 경우만 — 피벗 아래(돌파 대기)는 예약 대상
+    if s.is_extended and s.breakout_state != "돌파 대기":
+        lo, hi = s.buy_zone
+        zone = (fmt_money(lo, s_ccy) if hi - lo < lo * 0.001
+                else f"{fmt_money(lo, s_ccy)} ~ {fmt_money(hi, s_ccy)}")
+        return (
+            f'<span style="color:#c0392b;font-weight:600;">🚫 추격 금지 — 돌파 완료·확장</span> '
+            f'<small>({s.extension_reason})</small><br>'
+            f'<small>다음 매수: 10~20일선 눌림 {zone} 또는 새 베이스 형성 대기</small><br>'
+        )
+    rp = fmt_money(s.reserve_buy_price, s_ccy)
+    pv = fmt_money(s.pivot_line, s_ccy)
+    stop_str = f"손절 {fmt_money(s.reserve_stop, s_ccy)} (-{s.reserve_risk_pct:.1f}%)"
+    state = s.breakout_state
+    if state == "돌파 대기":
+        return (
+            f'<b>📋 예약 매수가 {rp}</b> '
+            f'<small>— 피벗 {pv} 돌파 시 체결 (현재 {s.pivot_gap_pct:+.1f}%)</small><br>'
+            f'<small>{stop_str} · 급등 전 미리 예약 가능</small><br>'
+        )
+    if state == "돌파 진행":
+        return (
+            f'<b>📋 매수가 {rp} 부근</b> '
+            f'<small>— 피벗 {pv} 돌파 진행 ({s.pivot_gap_pct:+.1f}%)</small><br>'
+            f'<small>{stop_str}</small><br>'
+        )
+    # 돌파 완료 (비확장) — 예약 시점 지남
+    return (
+        f'<small>돌파 완료 — 피벗 {pv} 대비 {s.pivot_gap_pct:+.1f}%. '
+        f'예약 매수 시점 지남 · 눌림/다음 베이스 대기</small><br>'
+    )
+
+
+# ── 상장 종목 유니버스 (이름·코드·티커 조회) ──────────
+UNIVERSE_DIR = Path(__file__).parent / "data"
+
+
+@st.cache_data(ttl=86400)
+def load_universe():
+    """KRX·미국 상장 종목 이름→티커 맵. build_universe.py로 생성·커밋."""
+    kr, us = {}, {}
+    try:
+        kr = json.loads((UNIVERSE_DIR / "kr_stock_universe.json").read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    try:
+        us = json.loads((UNIVERSE_DIR / "us_stock_universe.json").read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return kr, us
+
+
+def resolve_stock(query):
+    """이름·6자리코드·미국티커 → [(이름, 티커), ...] 후보 리스트."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    kr, us = load_universe()
+    # 1) 6자리 숫자 = 한국 종목코드
+    if q.isdigit() and len(q) == 6:
+        for nm, tk in kr.items():
+            if tk[:6] == q:
+                return [(nm, tk)]
+        return [(q, q + ".KS")]
+    # 2) 정확한 이름 (KR 우선)
+    if q in kr:
+        return [(q, kr[q])]
+    if q in us:
+        return [(q, us[q])]
+    # 3) 미국 티커 직접 입력
+    qu = q.upper()
+    for nm, tk in us.items():
+        if tk == qu:
+            return [(nm, qu)]
+    # 4) 부분 매치 (이름 포함) — KR + US
+    ql = q.lower()
+    hits = [(n, t) for n, t in kr.items() if ql in n.lower()]
+    hits += [(n, t) for n, t in us.items() if ql in n.lower()]
+    if hits:
+        hits.sort(key=lambda x: len(x[0]))  # 이름 짧은 순 = 검색어에 가까운 순
+        return hits[:30]
+    # 5) 영문 1~5자 = 미국 티커로 간주 (목록에 없어도 시도)
+    if 1 <= len(qu) <= 5 and qu.isalpha():
+        return [(qu, qu)]
+    return []
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def lookup_stock_score(ticker, name):
+    """티커 → StockScore (피벗·예약매수·ATR 등). 데이터 부족 시 None."""
+    from stock_scanner import _score_stock
+    try:
+        return _score_stock(ticker, name)
+    except Exception:
+        return None
 
 
 def make_chart(data, name, analysis, trailing_stop=None):
@@ -719,6 +822,17 @@ def main():
                     if s.is_next_day_candidate:
                         nextday_list.append((sr.name, s))
 
+            # ── 예약 매수 후보 (돌파 대기) — 섹터 중복 제거 ──
+            reserve_list, _seen_rsv = [], set()
+            for sr in sector_results:
+                for s in getattr(sr, "reserve", []):
+                    if s.ticker in _seen_rsv:
+                        continue
+                    _seen_rsv.add(s.ticker)
+                    reserve_list.append((sr.name, s))
+            # 피벗에 가까운 순 (돌파 임박 우선)
+            reserve_list.sort(key=lambda x: x[1].pivot_gap_pct, reverse=True)
+
             # ── KST 기반 시간대 인지 ───────────────
             from datetime import timezone, timedelta as _td
             kst_now = datetime.now(timezone(_td(hours=9)))
@@ -744,6 +858,7 @@ def main():
                 loss = " · 적자" if s.is_loss else ""
                 return f"<small>실적 매출 {rev} / 영익 {op}{loss}</small><br>"
 
+
             def _render_card(sector_name, s, show_qty=True):
                 s_ccy = "KRW" if s.is_kr else "USD"
                 s_risk = risk_amt_usd if s_ccy == "USD" else risk_amt
@@ -752,13 +867,14 @@ def main():
                 qty = int(s_risk / risk_ps) if risk_ps > 0 else 0
                 brk = "55일돌파" if s.breakout_55d else ("20일돌파" if s.breakout_20d else "추세")
                 gap_str = f"{s.gap_pct:+.1f}%" if abs(s.gap_pct) >= 0.1 else "0%"
+                # 확장 종목은 현재가 기준 수량 안내가 오해를 부르므로 매수 구간으로 대체
                 qty_line = (
                     f"손절: {fmt_money(stop, s_ccy)} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>"
-                    if show_qty else ""
+                    if show_qty and not s.is_extended else ""
                 )
                 return f"""<div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
-현재가: {fmt_money(s.price, s_ccy)} | {qty_line}<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
+현재가: {fmt_money(s.price, s_ccy)} | {qty_line}{breakout_plan_html(s)}<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
 {_fmt_fund(s)}</div>"""
 
             # ── A급: 매수 적기 ──────────────────
@@ -802,12 +918,27 @@ strict 필터 동시 만족 종목 없음.<br>
                 for sector_name, s in nextday_list:
                     s_ccy = "KRW" if s.is_kr else "USD"
                     reason = s.next_day_reason or "패턴 매칭"
-                    stop = s.price - 2 * s.atr20
                     st.markdown(f"""
 <div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {reason}<br>
-현재가: {fmt_money(s.price, s_ccy)} | 피벗+{s.extended_pct:+.1f}% · 종가강도 {s.close_strength:.2f} · 거래량 {s.volume_ratio:.1f}x<br>
-<small>참고 손절: {fmt_money(stop, s_ccy)} | ATR {s.atr_pct:.1f}% · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
+현재가: {fmt_money(s.price, s_ccy)} · 당일 {s.day_change_pct:+.1f}% · 피벗+{s.extended_pct:+.1f}% · 50일선+{s.ext_from_ma50:.0f}%<br>
+{breakout_plan_html(s)}<small>종가강도 {s.close_strength:.2f} · ATR {s.atr_pct:.1f}% · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
+</div>""", unsafe_allow_html=True)
+
+            # ── 예약 매수 후보 (돌파 대기) ──────────
+            if reserve_list:
+                st.markdown(f"""
+<div class="signal-hold">
+<b>📋 예약 매수 후보 — 돌파 대기 {len(reserve_list)}종목</b><br>
+<small>피벗(저항선) 아래 베이스 — 돌파 가격에 예약 매수를 미리 걸어 급등 전 선취</small>
+</div>""", unsafe_allow_html=True)
+                for sector_name, s in reserve_list:
+                    s_ccy = "KRW" if s.is_kr else "USD"
+                    st.markdown(f"""
+<div class="signal-hold">
+<b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — 피벗 {s.pivot_gap_pct:+.1f}% 아래<br>
+현재가: {fmt_money(s.price, s_ccy)} · 거래량 {s.volume_ratio:.1f}x · ATR {s.atr_pct:.1f}%<br>
+{breakout_plan_html(s)}<small>RS {s.rs:+.0f} · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             # ── 공시 리스크 종목 (사용 시 노출) ───
@@ -841,7 +972,7 @@ strict 필터 동시 만족 종목 없음.<br>
                         st.markdown(f"""
 <div class="signal-none">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}%<br>
-<small>현재가 {fmt_money(s.price, s_ccy)} · 피벗+{s.extended_pct:.1f}% · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}% · [{s.filter_status}]</small>
+{breakout_plan_html(s)}<small>현재가 {fmt_money(s.price, s_ccy)} · 피벗+{s.extended_pct:.1f}% · ATR {s.atr_pct:.1f}% · 손절거리 {s.stop_distance_pct:.1f}% · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             st.markdown("---")
@@ -1082,76 +1213,109 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
 
         with calc_tab1:
             st.markdown("##### 신규 진입 계산")
-            calc_asset = st.selectbox("종목", [r["name"] for r in results], key="calc_asset")
-            calc_r = next(r for r in results if r["name"] == calc_asset)
+            st.caption("상장 종목 조회 — 이름·6자리 코드·미국 티커 (예: HPSP, 035720, AAPL)")
+            calc_query = st.text_input(
+                "종목", key="calc_query",
+                placeholder="종목 이름 / 종목코드 / 티커 입력",
+                label_visibility="collapsed",
+            )
 
-            calc_ccy = detect_currency(calc_asset)
-            calc_risk = risk_amt_usd if calc_ccy == "USD" else risk_amt
-            calc_cash = get_cash(pf, calc_ccy)
+            calc_s = calc_name = calc_ticker = None
+            if calc_query.strip():
+                matches = resolve_stock(calc_query)
+                if not matches:
+                    st.warning(
+                        f"'{calc_query}' — 일치하는 상장 종목이 없습니다. "
+                        "이름·코드·티커를 확인하세요."
+                    )
+                elif len(matches) == 1:
+                    calc_name, calc_ticker = matches[0]
+                else:
+                    labels = [f"{n}  ·  {t}" for n, t in matches]
+                    pick = st.selectbox(
+                        f"{len(matches)}개 일치 — 종목 선택", labels, key="calc_pick"
+                    )
+                    calc_name, calc_ticker = matches[labels.index(pick)]
 
-            price = calc_r["price"]
-            atr = calc_r["atr20"]
-            stop_price = price - 2 * atr
-            risk_per_share = 2 * atr
+                if calc_ticker:
+                    with st.spinner(f"{calc_name} 데이터 조회 중..."):
+                        calc_s = lookup_stock_score(calc_ticker, calc_name)
+                    if calc_s is None:
+                        st.warning(
+                            f"{calc_name} ({calc_ticker}) — 가격 데이터가 부족하거나"
+                            "(신규 상장 등) 조회에 실패했습니다."
+                        )
 
-            if risk_per_share > 0 and price > 0:
-                qty = int(calc_risk / risk_per_share) if risk_per_share > 0 else 0
-                cost = qty * price
-                stop_pct = risk_per_share / price * 100
+            if calc_s is not None:
+                calc_ccy = detect_currency(calc_name, calc_ticker)
+                calc_risk = risk_amt_usd if calc_ccy == "USD" else risk_amt
+                calc_cash = get_cash(pf, calc_ccy)
 
-                # ── 거래비용: 한국주(거래세+수수료 ≈ 0.23%) / 미국주(왕복 수수료 ≈ 0.10%) ──
-                FEE_PCT = 0.10 if calc_ccy == "USD" else 0.23
-                breakeven_price = price * (1 + FEE_PCT / 100)
+                price = calc_s.price
+                atr = calc_s.atr20
+                stop_price = price - 2 * atr
+                risk_per_share = 2 * atr
 
-                # R배수 목표가 (gross)
-                r1 = price + 1 * risk_per_share
-                r2 = price + 2 * risk_per_share
-                r3 = price + 3 * risk_per_share
+                if risk_per_share > 0 and price > 0:
+                    qty = int(calc_risk / risk_per_share)
+                    cost = qty * price
+                    stop_pct = risk_per_share / price * 100
 
-                # R배수 (net = 거래비용 차감)
-                fee_per_share = price * FEE_PCT / 100
-                r1_net_pct = (r1 - price - fee_per_share) / price * 100
-                r2_net_pct = (r2 - price - fee_per_share) / price * 100
-                r3_net_pct = (r3 - price - fee_per_share) / price * 100
+                    # ── 거래비용: 한국주(거래세+수수료 ≈ 0.23%) / 미국주(≈ 0.10%) ──
+                    FEE_PCT = 0.10 if calc_ccy == "USD" else 0.23
+                    breakeven_price = price * (1 + FEE_PCT / 100)
 
-                affordable = "O" if cost <= calc_cash else "X"
+                    r1 = price + 1 * risk_per_share
+                    r2 = price + 2 * risk_per_share
+                    r3 = price + 3 * risk_per_share
+                    fee_per_share = price * FEE_PCT / 100
+                    r1_net_pct = (r1 - price - fee_per_share) / price * 100
+                    r2_net_pct = (r2 - price - fee_per_share) / price * 100
+                    r3_net_pct = (r3 - price - fee_per_share) / price * 100
+                    affordable = "O" if cost <= calc_cash else "X"
+                    align = "정배열" if calc_s.stage2 else "혼조"
 
-                st.markdown(f"""
+                    st.markdown(f"""
 <div class="signal-hold">
-현재가: **{fmt_money(price, calc_ccy)}** | ATR: {atr:,.2f}<br>
-{calc_r['alignment']} | 체제 {'OK' if calc_r['regime'] else 'X'} | {calc_r['signal']}
-</div>
-""", unsafe_allow_html=True)
+<b>{calc_s.name}</b> <small>[{calc_ccy}] · {calc_ticker}</small><br>
+현재가: <b>{fmt_money(price, calc_ccy)}</b> | ATR: {atr:,.2f} ({calc_s.atr_pct:.1f}%)<br>
+{align} · {calc_s.signal} · 50일선 {calc_s.ext_from_ma50:+.0f}% · 당일 {calc_s.day_change_pct:+.1f}%
+</div>""", unsafe_allow_html=True)
 
-                st.markdown(f"""
+                    # ── 돌파 피벗 / 예약 매수 계획 ──
+                    st.markdown(f"""
 <div class="signal-buy">
-<b>매수 계획</b> ({calc_ccy})<br>
+<b>돌파 예약 매수 — {calc_s.breakout_state}</b><br>
+{breakout_plan_html(calc_s)}</div>""", unsafe_allow_html=True)
+
+                    st.markdown(f"""
+<div class="signal-buy">
+<b>매수 계획 — 지금 매수 시</b> ({calc_ccy})<br>
 손절가: {fmt_money(stop_price, calc_ccy)} (-{stop_pct:.1f}%)<br>
-수량: **{qty}주** × {fmt_money(price, calc_ccy)} = **{fmt_money(cost, calc_ccy)}**<br>
+수량: <b>{qty}주</b> × {fmt_money(price, calc_ccy)} = <b>{fmt_money(cost, calc_ccy)}</b><br>
 최대손실: {fmt_money(calc_risk, calc_ccy)} ({risk_pct_input:.1f}%)<br>
 현금: {affordable} ({fmt_money(calc_cash, calc_ccy)})
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
-                st.markdown(f"""
+                    st.markdown(f"""
 <div class="signal-hold">
 <b>목표가 (R배수, gross / net)</b><br>
 손익분기: {fmt_money(breakeven_price, calc_ccy)} (+{FEE_PCT:.2f}% — 거래세·수수료)<br>
 1R (1:1): {fmt_money(r1, calc_ccy)} (gross +{(r1/price-1)*100:.1f}% / net +{r1_net_pct:.1f}%)<br>
 2R (2:1): {fmt_money(r2, calc_ccy)} (gross +{(r2/price-1)*100:.1f}% / net +{r2_net_pct:.1f}%)<br>
 3R (3:1): {fmt_money(r3, calc_ccy)} (gross +{(r3/price-1)*100:.1f}% / net +{r3_net_pct:.1f}%)
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
-                # 손절폭 8% 초과 경고
-                if stop_pct > 8.0:
-                    st.markdown(f"""
+                    if stop_pct > 8.0:
+                        st.markdown(f"""
 <div class="signal-none">
 주의 — 손절폭 {stop_pct:.1f}%가 8%를 초과<br>
 한국형 미너비니 기준상 매수 보류 권고. 변동성이 줄어든 다음 베이스 대기.
 </div>""", unsafe_allow_html=True)
-            else:
-                st.caption("ATR 데이터 부족")
+                else:
+                    st.caption("ATR 데이터 부족")
+            elif not calc_query.strip():
+                st.caption("종목 이름·코드·티커를 입력하면 매수 계획과 돌파 예약 매수가를 계산합니다.")
 
         with calc_tab2:
             st.markdown("##### 매수 (신규 / 애드업) — 리스크 비례")
@@ -1903,8 +2067,22 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                         skipped = 0
                         errors = []
                         cur = start_d
+                        total_days = (end_d - start_d).days + 1
+                        progress = st.progress(
+                            0.0, text=f"키움 조회 준비 중 (총 {total_days}일)"
+                        )
+                        day_idx = 0
                         with st.spinner("키움 API 조회 중..."):
                             while cur <= end_d:
+                                day_idx += 1
+                                progress.progress(
+                                    day_idx / total_days,
+                                    text=(
+                                        f"키움 조회 중 "
+                                        f"({cur.isoformat()}, "
+                                        f"{day_idx}/{total_days}일)"
+                                    ),
+                                )
                                 ymd = cur.strftime("%Y%m%d")
                                 try:
                                     res = kiwoom_api.fetch_order_history_kt00007(ymd)
@@ -1976,6 +2154,9 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                                         "kiwoom_stk_cd": row.get("stk_cd", ""),
                                     })
                                 cur += timedelta(days=1)
+                                if cur <= end_d:
+                                    time.sleep(0.3)  # 키움 API rate limit 회피
+                        progress.empty()
 
                         for err in errors:
                             st.warning(err)
