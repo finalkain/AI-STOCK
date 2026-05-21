@@ -762,6 +762,15 @@ def main():
         sector_results = st.session_state.get("sector_results", [])
         all_sectors = st.session_state.get("all_sectors", [])
 
+        # 배포 후 stale session_state 방어 — 구버전 StockScore(신규 필드 누락) 폐기
+        _probe = next((s for sr in sector_results
+                       for s in getattr(sr, "leaders", [])), None)
+        if _probe is not None and not hasattr(_probe, "day_change_pct"):
+            st.session_state.pop("sector_results", None)
+            st.session_state.pop("all_sectors", None)
+            sector_results, all_sectors = [], []
+            st.info("이전 버전 스캔 결과를 비웠습니다 — '섹터 스캔'을 다시 실행하세요.")
+
         if sector_results:
             # ── 시장 체제 (KOSPI / S&P500) ────────
             def _regime_status(name):
