@@ -450,6 +450,16 @@ def resolve_stock(query):
     return []
 
 
+def resolve_stock_in_market(query, market):
+    """resolve_stock 결과를 시장(KR/US)으로 필터. market: 'KR' | 'US'."""
+    out = []
+    for nm, tk in resolve_stock(query):
+        ccy = detect_currency(nm, tk)
+        if (market == "KR" and ccy == "KRW") or (market == "US" and ccy == "USD"):
+            out.append((nm, tk))
+    return out
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def lookup_stock_score(ticker, name):
     """티커 → StockScore (피벗·예약매수·ATR 등). 데이터 부족 시 None."""
@@ -1700,29 +1710,74 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
             )
 
             if trade_mode == "매수":
-                st.markdown("##### 매수 적용 (진입 계산기 종목 전체)")
-                if not results:
-                    st.caption("종목 데이터 없음")
+                st.markdown("##### 매수 시뮬레이션 — 검색 후 리스크 비례 수량 계산")
+                bmkt = st.radio(
+                    "시장", ["국내주식", "미국주식"], horizontal=True,
+                    key="buy_market_t3",
+                )
+                bmarket = "KR" if bmkt == "국내주식" else "US"
+                st.caption(
+                    "종목 이름·코드·티커로 검색 — "
+                    + ("예: 한미반도체 · 042700" if bmarket == "KR"
+                       else "예: AAPL · NVDA")
+                )
+                buy_query = st.text_input(
+                    "종목", key="buy_query_t3",
+                    placeholder="종목 이름 / 종목코드 / 티커 입력",
+                    label_visibility="collapsed",
+                )
+
+                buy_s = buy_name = buy_ticker = None
+                if buy_query.strip():
+                    matches = resolve_stock_in_market(buy_query, bmarket)
+                    if not matches:
+                        st.warning(
+                            f"'{buy_query}' — {bmkt}에서 일치하는 종목이 "
+                            "없습니다. 이름·코드·티커를 확인하세요."
+                        )
+                    elif len(matches) == 1:
+                        buy_name, buy_ticker = matches[0]
+                    else:
+                        labels = [f"{n}  ·  {t}" for n, t in matches]
+                        pick = st.selectbox(
+                            f"{len(matches)}개 일치 — 종목 선택", labels,
+                            key="buy_pick_t3",
+                        )
+                        buy_name, buy_ticker = matches[labels.index(pick)]
+
+                    if buy_ticker:
+                        with st.spinner(f"{buy_name} 데이터 조회 중..."):
+                            buy_s = lookup_stock_score(buy_ticker, buy_name)
+                        if buy_s is None:
+                            st.warning(
+                                f"{buy_name} ({buy_ticker}) — 가격 데이터가 "
+                                "부족하거나 조회에 실패했습니다."
+                            )
+
+                if buy_s is None:
+                    if not buy_query.strip():
+                        st.caption(
+                            "종목을 검색하면 현재 리스크 기준 매수 가능 "
+                            "수량과 손절가를 계산합니다."
+                        )
                 else:
-                    buy_asset = st.selectbox(
-                        "종목", [r["name"] for r in results], key="buy_asset_t3"
-                    )
-                    buy_r = next(r for r in results if r["name"] == buy_asset)
-                    cur_price = buy_r["price"]
-                    cur_atr = buy_r["atr20"]
+                    buy_asset = buy_name
+                    cur_price = buy_s.price
+                    cur_atr = buy_s.atr20
 
                     existing = next(
                         (p for p in pf["positions"] if p["asset"] == buy_asset), None
                     )
                     is_held = existing is not None and existing["shares"] > 0
 
-                    # 통화 판정: 보유 중이면 보유 통화 우선, 아니면 이름 기반
+                    # 통화 판정: 보유 중이면 보유 통화 우선, 아니면 티커 기반
                     buy_ccy = (existing.get("currency") if existing else None) \
-                              or detect_currency(buy_asset)
+                              or detect_currency(buy_asset, buy_ticker)
                     buy_risk = risk_amt_usd if buy_ccy == "USD" else risk_amt
                     buy_cash_bucket = get_cash(pf, buy_ccy)
                     unit = money_unit(buy_ccy)
 
+                    align = "정배열" if buy_s.stage2 else "혼조"
                     if is_held:
                         avg = existing["avg_price"]
                         shares_held = existing["shares"]
@@ -1730,22 +1785,37 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                         cur_pnl_pct = (cur_price - avg) / avg * 100 if avg > 0 else 0
                         st.markdown(f"""
 <div class="signal-hold">
-<b>{buy_asset}</b> [보유 중] | 현재가: {fmt_money(cur_price, buy_ccy)} ({cur_pnl_pct:+.1f}%) | ATR: {cur_atr:,.2f}<br>
-{buy_r['alignment']} | 체제 {'OK' if buy_r['regime'] else 'X'} | {buy_r['signal']}<br>
+<b>{buy_asset}</b> [보유 중] <small>[{buy_ccy}] · {buy_ticker}</small><br>
+현재가: <b>{fmt_money(cur_price, buy_ccy)}</b> ({cur_pnl_pct:+.1f}%) | ATR: {cur_atr:,.2f} ({buy_s.atr_pct:.1f}%)<br>
+{align} · {buy_s.signal} · 50일선 {buy_s.ext_from_ma50:+.0f}%<br>
 보유: {shares_held}주 × 평균 {fmt_money(avg, buy_ccy)} | Stop: {fmt_money(cur_stop, buy_ccy)}
 </div>""", unsafe_allow_html=True)
                     else:
                         st.markdown(f"""
 <div class="signal-hold">
-<b>{buy_asset}</b> [미보유] | 현재가: {fmt_money(cur_price, buy_ccy)} | ATR: {cur_atr:,.2f}<br>
-{buy_r['alignment']} | 체제 {'OK' if buy_r['regime'] else 'X'} | {buy_r['signal']}
+<b>{buy_asset}</b> [미보유] <small>[{buy_ccy}] · {buy_ticker}</small><br>
+현재가: <b>{fmt_money(cur_price, buy_ccy)}</b> | ATR: {cur_atr:,.2f} ({buy_s.atr_pct:.1f}%)<br>
+{align} · {buy_s.signal} · 50일선 {buy_s.ext_from_ma50:+.0f}%
 </div>""", unsafe_allow_html=True)
+
+                    # ── 돌파 피벗 / 예약 매수 계획 ──
+                    st.markdown(f"""
+<div class="signal-buy">
+<b>돌파 예약 매수 — {buy_s.breakout_state}</b><br>
+{breakout_plan_html(buy_s)}</div>""", unsafe_allow_html=True)
 
                     st.markdown("---")
                     risk_ps_auto = 2 * cur_atr if cur_atr > 0 else 0
                     auto_qty = int(buy_risk / risk_ps_auto) if risk_ps_auto > 0 else 0
                     auto_stop_raw = cur_price - 2 * cur_atr if cur_atr > 0 else cur_price * 0.92
                     auto_stop = round(auto_stop_raw, 2) if buy_ccy == "USD" else int(auto_stop_raw)
+
+                    st.caption(
+                        f"위험부담 {pf['risk_pct']*100:.1f}% "
+                        f"({fmt_money(buy_risk, buy_ccy)}) · ATR 2배 손절 기준 → "
+                        f"권장 매수 수량 **{auto_qty}주** · 손절가 "
+                        f"{fmt_money(auto_stop, buy_ccy)} (값은 아래에서 조정 가능)"
+                    )
 
                     buy_cols = st.columns(3)
                     buy_qty = buy_cols[0].number_input(
