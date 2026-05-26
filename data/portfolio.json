@@ -1,10 +1,21 @@
 {
   "total_capital": 3085500,
   "cash": 3123775,
-  "cash_usd": 4919.72,
+  "cash_usd": 4316.29,
   "margin_value": 1130400,
   "risk_pct": 0.005,
-  "positions": [],
+  "positions": [
+    {
+      "asset": "Lam Research Corp",
+      "currency": "USD",
+      "shares": 2,
+      "avg_price": 301.715,
+      "current_value": 610.70,
+      "trailing_stop": 274.10,
+      "entry_date": "2026-05-25",
+      "note": "신규 매수 (LRCX, 미국)"
+    }
+  ],
   "journal": [
     {
       "date": "2026-04-01",
@@ -77,6 +88,15 @@
       "price": 144645,
       "pnl": 121116,
       "reason": "전량 매도 (4주 × 144,645 - 평균 114,366 = +121,116원)"
+    },
+    {
+      "date": "2026-05-25",
+      "action": "BUY",
+      "asset": "Lam Research Corp",
+      "currency": "USD",
+      "shares": 2,
+      "price": 301.715,
+      "reason": "신규 매수 (수동 백필 - 매수/매도 탭 저장 누락 복구). 손절 $274.10 = 1% 리스크 + ~2×ATR"
     }
   ]
 }
