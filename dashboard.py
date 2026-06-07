@@ -775,7 +775,7 @@ def main():
         # 배포 후 stale session_state 방어 — 구버전 StockScore(신규 필드 누락) 폐기
         _probe = next((s for sr in sector_results
                        for s in getattr(sr, "leaders", [])), None)
-        if _probe is not None and not hasattr(_probe, "day_change_pct"):
+        if _probe is not None and not hasattr(_probe, "down_market_breakout"):
             st.session_state.pop("sector_results", None)
             st.session_state.pop("all_sectors", None)
             sector_results, all_sectors = [], []
@@ -852,6 +852,16 @@ def main():
             # 피벗에 가까운 순 (돌파 임박 우선)
             reserve_list.sort(key=lambda x: x[1].pivot_gap_pct, reverse=True)
 
+            # ── 조정장 돌파(burge out) — 시장 조정 중인데 신고가 돌파 = 최상급 ──
+            downbo_list, _seen_dbo = [], set()
+            for sr in sector_results:
+                for s in sr.leaders:
+                    if getattr(s, "down_market_breakout", False) and s.ticker not in _seen_dbo:
+                        _seen_dbo.add(s.ticker)
+                        downbo_list.append((sr.name, s))
+            # 시장 대비 상대강도 높은 순
+            downbo_list.sort(key=lambda x: x[1].rs_rel, reverse=True)
+
             # ── KST 기반 시간대 인지 ───────────────
             from datetime import timezone, timedelta as _td
             kst_now = datetime.now(timezone(_td(hours=9)))
@@ -893,8 +903,28 @@ def main():
                 )
                 return f"""<div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
-현재가: {fmt_money(s.price, s_ccy)} | {qty_line}{breakout_plan_html(s)}<small>거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
+현재가: {fmt_money(s.price, s_ccy)} | {qty_line}{breakout_plan_html(s)}<small>상대RS {s.rs_rel:+.0f} · 매집 {s.ud_vol_ratio:.1f}x · 거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
 {_fmt_fund(s)}</div>"""
+
+            # ── ★ 조정장 돌파 (burge out) — 최상급 셋업 ──
+            # 시장(지수)이 조정·하락 국면인데 종목이 신고가를 돌파 →
+            # 기관이 조정기에 사들이는 진짜 추세. 트레이딩 노트의 핵심 엣지.
+            if downbo_list:
+                st.markdown(f"""
+<div class="signal-buy">
+<b>★ 조정장 돌파 — {len(downbo_list)}종목 (burge out)</b><br>
+<small>시장 지수가 조정/하락 중인데 신고가 돌파 — 시장 대비 상대강도가 가장 신뢰되는 구간</small>
+</div>""", unsafe_allow_html=True)
+                for sector_name, s in downbo_list:
+                    s_ccy = "KRW" if s.is_kr else "USD"
+                    brk = "55일돌파" if s.breakout_55d else ("20일돌파" if s.breakout_20d else "추세")
+                    acc = f" · 기관매집 {s.ud_vol_ratio:.1f}x" if s.ud_vol_ratio >= 1.1 else ""
+                    st.markdown(f"""
+<div class="signal-hold">
+<b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · <b>상대RS {s.rs_rel:+.0f}</b>{acc}<br>
+현재가: {fmt_money(s.price, s_ccy)} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · ATR {s.atr_pct:.1f}%<br>
+{breakout_plan_html(s)}<small>시장 지수 조정 국면 · [{s.filter_status}]</small>
+</div>""", unsafe_allow_html=True)
 
             # ── A급: 매수 적기 ──────────────────
             if a_list:
@@ -1012,6 +1042,8 @@ strict 필터 동시 만족 종목 없음.<br>
                             "종목": s.name,
                             "통화": s_ccy,
                             "현재가": fmt_money(s.price, s_ccy),
+                            "상대RS": f"{s.rs_rel:+.0f}",
+                            "매집": f"{s.ud_vol_ratio:.1f}x",
                             "거래대금": _fmt_turnover(s),
                             "ATR%": f"{s.atr_pct:.1f}",
                             "52주高": f"-{s.near_high_pct:.1f}%",
