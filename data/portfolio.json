@@ -1,9 +1,9 @@
 {
-  "total_capital": 3085500,
-  "cash": 3123775,
+  "total_capital": 3123775,
+  "cash": 3123580,
   "cash_usd": 4316.29,
   "margin_value": 1130400,
-  "risk_pct": 0.005,
+  "risk_pct": 0.01,
   "positions": [
     {
       "asset": "Lam Research Corp",
@@ -18,12 +18,221 @@
   ],
   "journal": [
     {
+      "date": "2026-03-05",
+      "action": "SELL",
+      "asset": "HPSP",
+      "currency": "KRW",
+      "shares": 15,
+      "price": 46750,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0916545",
+      "kiwoom_stk_cd": "A403870"
+    },
+    {
+      "date": "2026-03-09",
+      "action": "BUY",
+      "asset": "KODEX 인버스",
+      "currency": "KRW",
+      "shares": 300,
+      "price": 1841,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0465672",
+      "kiwoom_stk_cd": "A114800"
+    },
+    {
+      "date": "2026-03-09",
+      "action": "BUY",
+      "asset": "TIGER 구리실물",
+      "currency": "KRW",
+      "shares": 10,
+      "price": 15340,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0549757",
+      "kiwoom_stk_cd": "A160580"
+    },
+    {
+      "date": "2026-03-09",
+      "action": "BUY",
+      "asset": "TIGER 구리실물",
+      "currency": "KRW",
+      "shares": 10,
+      "price": 15145,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0615613",
+      "kiwoom_stk_cd": "A160580"
+    },
+    {
+      "date": "2026-03-09",
+      "action": "SELL",
+      "asset": "KODEX 인버스",
+      "currency": "KRW",
+      "shares": 300,
+      "price": 1844,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0738674",
+      "kiwoom_stk_cd": "A114800"
+    },
+    {
+      "date": "2026-03-09",
+      "action": "BUY",
+      "asset": "HPSP",
+      "currency": "KRW",
+      "shares": 5,
+      "price": 43350,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0905051",
+      "kiwoom_stk_cd": "A403870"
+    },
+    {
+      "date": "2026-03-10",
+      "action": "SELL",
+      "asset": "HPSP",
+      "currency": "KRW",
+      "shares": 5,
+      "price": 46000,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0373154",
+      "kiwoom_stk_cd": "A403870"
+    },
+    {
+      "date": "2026-03-11",
+      "action": "BUY",
+      "asset": "HPSP",
+      "currency": "KRW",
+      "shares": 10,
+      "price": 45500,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0173595",
+      "kiwoom_stk_cd": "A403870"
+    },
+    {
+      "date": "2026-03-11",
+      "action": "BUY",
+      "asset": "HPSP",
+      "currency": "KRW",
+      "shares": 5,
+      "price": 44650,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0562390",
+      "kiwoom_stk_cd": "A403870"
+    },
+    {
+      "date": "2026-03-19",
+      "action": "SELL",
+      "asset": "HPSP",
+      "currency": "KRW",
+      "shares": 15,
+      "price": 50000,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0126249",
+      "kiwoom_stk_cd": "A403870"
+    },
+    {
+      "date": "2026-03-19",
+      "action": "BUY",
+      "asset": "TIGER 구리실물",
+      "currency": "KRW",
+      "shares": 20,
+      "price": 15115,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0453569",
+      "kiwoom_stk_cd": "A160580"
+    },
+    {
+      "date": "2026-03-19",
+      "action": "BUY",
+      "asset": "TIGER 구리실물",
+      "currency": "KRW",
+      "shares": 10,
+      "price": 15100,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0636811",
+      "kiwoom_stk_cd": "A160580"
+    },
+    {
+      "date": "2026-03-24",
+      "action": "BUY",
+      "asset": "두산에너빌리티",
+      "currency": "KRW",
+      "shares": 3,
+      "price": 99800,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0362095",
+      "kiwoom_stk_cd": "A034020"
+    },
+    {
+      "date": "2026-03-24",
+      "action": "BUY",
+      "asset": "두산에너빌리티",
+      "currency": "KRW",
+      "shares": 1,
+      "price": 97700,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0530497",
+      "kiwoom_stk_cd": "A034020"
+    },
+    {
+      "date": "2026-03-24",
+      "action": "BUY",
+      "asset": "TIGER 구리실물",
+      "currency": "KRW",
+      "shares": 10,
+      "price": 14540,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0780651",
+      "kiwoom_stk_cd": "A160580"
+    },
+    {
+      "date": "2026-03-30",
+      "action": "BUY",
+      "asset": "동운아나텍",
+      "currency": "KRW",
+      "shares": 20,
+      "price": 30750,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0480811",
+      "kiwoom_stk_cd": "A094170"
+    },
+    {
       "date": "2026-04-01",
       "action": "BUY",
       "asset": "TIGER구리실물",
       "shares": 90,
       "price": 15186,
       "reason": "펀더멘털 기반 매수 (추세추종 시스템 이전 진입)"
+    },
+    {
+      "date": "2026-04-01",
+      "action": "SELL",
+      "asset": "두산에너빌리티",
+      "currency": "KRW",
+      "shares": 4,
+      "price": 99700,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0776578",
+      "kiwoom_stk_cd": "A034020"
+    },
+    {
+      "date": "2026-04-14",
+      "action": "SELL",
+      "asset": "동운아나텍",
+      "currency": "KRW",
+      "shares": 20,
+      "price": 30900,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0768230",
+      "kiwoom_stk_cd": "A094170"
+    },
+    {
+      "date": "2026-04-17",
+      "action": "BUY",
+      "asset": "KODEX 반도체",
+      "currency": "KRW",
+      "shares": 3,
+      "price": 110595,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0405118",
+      "kiwoom_stk_cd": "A091160"
     },
     {
       "date": "2026-04-18",
@@ -40,6 +249,17 @@
       "shares": 1,
       "price": 125680,
       "reason": "추가매수 (백필)"
+    },
+    {
+      "date": "2026-04-30",
+      "action": "BUY",
+      "asset": "KODEX 반도체",
+      "currency": "KRW",
+      "shares": 1,
+      "price": 125680,
+      "reason": "키움 자동 임포트",
+      "kiwoom_ord_no": "0584498",
+      "kiwoom_stk_cd": "A091160"
     },
     {
       "date": "2026-05-04",
@@ -98,5 +318,6 @@
       "price": 301.715,
       "reason": "신규 매수 (수동 백필 - 매수/매도 탭 저장 누락 복구). 손절 $274.10 = 1% 리스크 + ~2×ATR"
     }
-  ]
+  ],
+  "total_capital_usd": 4926.99
 }

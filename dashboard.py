@@ -610,6 +610,18 @@ def main():
     total_usd = cash_usd + pos_value_usd
     pf["total_capital"] = total_krw
     pf["total_capital_usd"] = round(total_usd, 2)
+    # 기준 자본(최초 입금) — 평가손익의 기준점. total_capital과 달리 덮어쓰지 않는다.
+    # 원화·달러는 별도 계좌이므로 각자 기준 대비 수익을 계산한다.
+    if "base_capital" not in pf:
+        pf["base_capital"] = 3085500                   # 기록상 최초 원화 기준 (UI에서 수정)
+    if "base_capital_usd" not in pf:
+        pf["base_capital_usd"] = round(total_usd, 2)   # 최초 달러 기준 (UI에서 수정)
+    base_krw = pf.get("base_capital") or total_krw
+    base_usd = pf.get("base_capital_usd") or 0.0
+    acct_pnl_krw = total_krw - base_krw
+    acct_pnl_usd = total_usd - base_usd
+    acct_ret_krw = (acct_pnl_krw / base_krw * 100) if base_krw else 0.0
+    acct_ret_usd = (acct_pnl_usd / base_usd * 100) if base_usd else 0.0
     risk_amt = int(total_krw * pf["risk_pct"])       # KRW 거래용
     risk_amt_usd = round(total_usd * pf["risk_pct"], 2)  # USD 거래용
 
@@ -665,15 +677,108 @@ def main():
             f"필요수익률: **{required_return:.2f}%**",
             unsafe_allow_html=True,
         )
+        # 돌파 예약매수 버퍼 — 예약가 = 피벗 ×(1+버퍼). 크면 가짜돌파를 거르고
+        # 작으면(0=피벗 정확히) 평단 우선. 모듈 전역에 반영해 재렌더 시 적용.
+        import stock_scanner as _ss
+        buf_pct = st.slider(
+            "돌파 버퍼 (%)", 0.0, 1.0,
+            float(_ss.RESERVE_BUFFER * 100), 0.1,
+            key="buf_slider",
+            help="예약 매수가 = 피벗 ×(1+버퍼). 클수록 속임수 돌파를 거르지만 평단은 불리. "
+                 "0=피벗에 정확히 (매물대 위 진입 우선)",
+        )
+        _ss.RESERVE_BUFFER = buf_pct / 100
 
     # ── 2행: 평가손익 / 포트 리스크 (통화별) ─────
     pnl_row = st.columns(4)
-    pnl_row[0].metric("평가손익 (원화)", f"{total_pnl_krw:+,.0f}원")
-    pnl_row[1].metric("평가손익 (달러)", f"${total_pnl_usd:+,.2f}")
+    pnl_row[0].metric(
+        "총수익 (원화)", f"{acct_pnl_krw:+,.0f}원",
+        delta=f"{acct_ret_krw:+.2f}%", delta_color="off",
+        help=f"현재 원화 총자산 {total_krw:,}원 − 기준자본 {base_krw:,.0f}원 "
+             f"(보유 미실현 {total_pnl_krw:+,.0f}원 포함)")
+    pnl_row[1].metric(
+        "총수익 (달러)", f"${acct_pnl_usd:+,.2f}",
+        delta=f"{acct_ret_usd:+.2f}%", delta_color="off",
+        help=f"현재 달러 총자산 ${total_usd:,.2f} − 기준자본 ${base_usd:,.2f} "
+             f"(보유 미실현 ${total_pnl_usd:+,.2f} 포함)")
     pnl_row[2].metric("포트 리스크 (원화)", f"{stop_loss_krw:,.0f}원",
                       delta=f"{port_risk_pct_krw:.1f}%", delta_color="inverse")
     pnl_row[3].metric("포트 리스크 (달러)", f"${stop_loss_usd:,.2f}",
                       delta=f"{port_risk_pct_usd:.1f}%", delta_color="inverse")
+
+    # ── 기준 자본 설정 — 최초 입금액 대비 수익 계산의 기준점 ──────
+    with st.expander(
+        f"⚙️ 기준 자본 (원화 {base_krw:,.0f}원 · 달러 ${base_usd:,.2f}) — 최초 입금액 대비 수익"
+    ):
+        bc = st.columns([1, 1, 0.6])
+        new_base_krw = bc[0].number_input(
+            "원화 기준자본 (원)", min_value=0, step=10000,
+            value=int(base_krw), key="base_krw_input")
+        new_base_usd = bc[1].number_input(
+            "달러 기준자본 (USD)", min_value=0.0, step=100.0,
+            value=float(base_usd), key="base_usd_input")
+        if bc[2].button("기준 저장", key="save_base"):
+            pf["base_capital"] = int(new_base_krw)
+            pf["base_capital_usd"] = round(float(new_base_usd), 2)
+            ok = save_portfolio(
+                pf,
+                commit_msg=f"기준 자본 갱신: {int(new_base_krw):,}원 / ${new_base_usd:,.2f}",
+            )
+            (st.success if ok else st.error)(
+                "기준 자본 저장됨 — 반영됨" if ok else "저장 실패")
+            if ok:
+                st.rerun()
+        st.caption(
+            "최초 입금한 원금을 입력하세요. 이 값 대비 현재 총자산으로 총수익을 계산합니다. "
+            "원화·달러는 별도 계좌로 각각 계산됩니다. "
+            f"(기록상 최초 원화 기준 3,085,500원 · 달러는 직접 입력 필요)")
+
+    # ── 출혈(드로다운) 패널 — 횡보장 생존 모니터 ──────────
+    # 미래의 레짐은 예측 불가하지만 출혈의 깊이·기간은 실시간 측정 가능.
+    # 실현손익 곡선(journal FIFO)으로 신고점 낙폭·경과일·연속손절을 수치화하고
+    # 한계선 초과 시 사이즈 축소/매매 중단을 권고한다.
+    try:
+        from drawdown_tracker import realized_equity_metrics, assess
+        _dd = realized_equity_metrics(
+            pf.get("journal", []),
+            total_capital=max(total_krw, 1),
+            today=datetime.now(),
+        )
+        _st = assess(_dd)
+        with st.expander(
+            f"🩸 출혈 모니터 — {_st['status']} "
+            f"(낙폭 -{_dd['drawdown_pct']:.1f}% · 신고점 {_dd['days_since_high']}일 전 · "
+            f"연속손절 {_dd['consecutive_losses']}회)",
+            expanded=(_st["level"] >= 1),
+        ):
+            dd_row = st.columns(4)
+            dd_row[0].metric("실현 낙폭", f"-{_dd['drawdown_krw']:,.0f}원",
+                             delta=f"-{_dd['drawdown_pct']:.1f}%",
+                             delta_color="inverse")
+            dd_row[1].metric("신고점 경과", f"{_dd['days_since_high']}일",
+                             help="마지막 실현 자본 신고점 이후 경과일 — 길수록 횡보장 의심")
+            dd_row[2].metric("연속 손절", f"{_dd['consecutive_losses']}회",
+                             delta_color="inverse")
+            dd_row[3].metric("실현 승률",
+                             f"{_dd['win_rate']:.0f}%",
+                             delta=f"{_dd['wins']}승 {_dd['losses']}패 / {_dd['closed_count']}건",
+                             delta_color="off")
+            banner = "signal-buy" if _st["level"] == 2 else (
+                "signal-none" if _st["level"] == 1 else "signal-hold")
+            reasons_html = "<br>".join("· " + r for r in _st["reasons"])
+            st.markdown(f"""
+<div class="{banner}">
+<b>{_st['status']}</b><br>
+{reasons_html}<br>
+<small>실현손익 누적 {_dd['realized_total']:+,.0f}원 · 청산 {_dd['closed_count']}건 (저널 기반, 평가손익 별도)</small>
+</div>""", unsafe_allow_html=True)
+            st.caption(
+                "추세추종은 승률이 낮고 횡보장에서 잔손실이 누적됩니다. "
+                "이 패널은 '미래 예측'이 아니라 '출혈을 한계선 안에 가두기' 위한 것 — "
+                "한계선 초과 시 사이즈를 줄이거나 멈추고, 본업 현금흐름으로 시간을 버티세요."
+            )
+    except Exception as _e:
+        st.caption(f"출혈 모니터 계산 불가: {_e}")
 
     st.divider()
 
