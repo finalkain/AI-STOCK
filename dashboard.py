@@ -706,32 +706,49 @@ def main():
     pnl_row[3].metric("포트 리스크 (달러)", f"${stop_loss_usd:,.2f}",
                       delta=f"{port_risk_pct_usd:.1f}%", delta_color="inverse")
 
-    # ── 기준 자본 설정 — 최초 입금액 대비 수익 계산의 기준점 ──────
+    # ── 자본 설정 — 현재 잔고(현금) + 기준 자본 직접 수정 ──────
     with st.expander(
-        f"⚙️ 기준 자본 (원화 {base_krw:,.0f}원 · 달러 ${base_usd:,.2f}) — 최초 입금액 대비 수익"
+        f"⚙️ 자본 설정 — 현재 잔고 / 기준 자본 "
+        f"(원화 {total_krw:,.0f}원 · 달러 ${total_usd:,.2f})"
     ):
-        bc = st.columns([1, 1, 0.6])
+        st.markdown(
+            "**현재 잔고 (현금)** — 증권사 계좌의 실제 현금. "
+            "총자산 = 현금 + 보유 종목 평가액(자동)")
+        cc = st.columns([1, 1])
+        new_cash_krw = cc[0].number_input(
+            "원화 현금 (원)", min_value=0, step=10000,
+            value=int(cash), key="cash_krw_input")
+        new_cash_usd = cc[1].number_input(
+            "달러 현금 (USD)", min_value=0.0, step=100.0,
+            value=float(cash_usd), key="cash_usd_input")
+        st.markdown(
+            "**기준 자본 (최초 입금액)** — 이 값 대비 현재 총자산으로 수익률 계산")
+        bc = st.columns([1, 1])
         new_base_krw = bc[0].number_input(
             "원화 기준자본 (원)", min_value=0, step=10000,
             value=int(base_krw), key="base_krw_input")
         new_base_usd = bc[1].number_input(
             "달러 기준자본 (USD)", min_value=0.0, step=100.0,
             value=float(base_usd), key="base_usd_input")
-        if bc[2].button("기준 저장", key="save_base"):
+        if st.button("저장", key="save_capital"):
+            pf["cash"] = int(new_cash_krw)
+            pf["cash_usd"] = round(float(new_cash_usd), 2)
             pf["base_capital"] = int(new_base_krw)
             pf["base_capital_usd"] = round(float(new_base_usd), 2)
             ok = save_portfolio(
                 pf,
-                commit_msg=f"기준 자본 갱신: {int(new_base_krw):,}원 / ${new_base_usd:,.2f}",
+                commit_msg=(
+                    f"자본 갱신: 현금 {int(new_cash_krw):,}원/${new_cash_usd:,.2f}, "
+                    f"기준 {int(new_base_krw):,}원/${new_base_usd:,.2f}"),
             )
             (st.success if ok else st.error)(
-                "기준 자본 저장됨 — 반영됨" if ok else "저장 실패")
+                "저장됨 — 반영됨" if ok else "저장 실패")
             if ok:
                 st.rerun()
         st.caption(
-            "최초 입금한 원금을 입력하세요. 이 값 대비 현재 총자산으로 총수익을 계산합니다. "
+            "현재 잔고는 증권사 화면의 현금 잔고를, 기준 자본은 최초 입금 원금을 입력하세요. "
             "원화·달러는 별도 계좌로 각각 계산됩니다. "
-            f"(기록상 최초 원화 기준 3,085,500원 · 달러는 직접 입력 필요)")
+            "(기록상 최초 원화 기준 3,085,500원 · 달러 기준은 직접 입력 필요)")
 
     # ── 출혈(드로다운) 패널 — 횡보장 생존 모니터 ──────────
     # 미래의 레짐은 예측 불가하지만 출혈의 깊이·기간은 실시간 측정 가능.
