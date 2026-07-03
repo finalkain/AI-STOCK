@@ -141,7 +141,7 @@ SECTORS = {
         "stocks": [
             ("035420.KS", "NAVER"),
             # 중소형 AI/데이터
-            ("078340.KQ", "컴투스"), ("367340.KQ", "플리토"),
+            ("078340.KQ", "컴투스"),
             ("226330.KQ", "쏘카"), ("041020.KQ", "폴라리스오피스"),
             ("PLTR", "Palantir"), ("CRWD", "CrowdStrike"),
             ("NET", "Cloudflare"), ("NOW", "ServiceNow"),
