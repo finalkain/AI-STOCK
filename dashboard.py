@@ -878,66 +878,69 @@ def main():
 """)
 
         if run_sector_scan:
-            from stock_scanner import scan_sectors
+            from stock_scanner import scan_sectors, get_market_ctx
             progress = st.progress(0, text="섹터 RS 계산 중...")
             def _progress(pct, msg):
                 progress.progress(min(pct, 1.0), text=msg)
+            # 시장별(한/미) 분리 랭킹 — top_n은 시장당 상위 섹터 수
             sector_results, all_sectors = scan_sectors(
-                top_n=4, leaders_per_sector=5,
+                top_n=3, leaders_per_sector=5,
                 progress_callback=_progress,
                 dart_api_key=(dart_key if use_dart else None),
             )
             progress.empty()
             st.session_state["sector_results"] = sector_results
             st.session_state["all_sectors"] = all_sectors
+            # 스캔 시점의 벤치마크 국면(KOSPI/KOSDAQ/S&P500) — 캐시 재사용
+            st.session_state["scanner_mkt_ctx"] = get_market_ctx()
 
         sector_results = st.session_state.get("sector_results", [])
         all_sectors = st.session_state.get("all_sectors", [])
 
-        # 배포 후 stale session_state 방어 — 구버전 StockScore(신규 필드 누락) 폐기
+        # 배포 후 stale session_state 방어 — 구버전 결과(신규 필드 누락) 폐기
         _probe = next((s for sr in sector_results
                        for s in getattr(sr, "leaders", [])), None)
-        if _probe is not None and not hasattr(_probe, "down_market_breakout"):
+        _probe_sr = sector_results[0] if sector_results else None
+        if ((_probe is not None and not hasattr(_probe, "market_regime"))
+                or (_probe_sr is not None and not getattr(_probe_sr, "market", ""))):
             st.session_state.pop("sector_results", None)
             st.session_state.pop("all_sectors", None)
+            st.session_state.pop("scanner_mkt_ctx", None)
             sector_results, all_sectors = [], []
             st.info("이전 버전 스캔 결과를 비웠습니다 — '섹터 스캔'을 다시 실행하세요.")
 
         if sector_results:
-            # ── 시장 체제 (KOSPI / S&P500) ────────
-            def _regime_status(name):
-                if name not in all_data:
-                    return None
-                d = all_data[name]
-                cs = d["Close"].values.astype(float)
-                if len(cs) < 50:
-                    return None
-                p, ma20, ma50 = cs[-1], np.mean(cs[-20:]), np.mean(cs[-50:])
-                above20, above50 = p > ma20, p > ma50
-                if above20 and above50:
-                    return f"{name}: 강세 (20일선 +{(p/ma20-1)*100:.1f}%, 50일선 +{(p/ma50-1)*100:.1f}%)"
-                if above50:
-                    return f"{name}: 중립 (50일선 위, 20일선 아래)"
-                return f"{name}: 약세 (50일선 이탈)"
-
-            regime_lines = [r for r in [_regime_status("KOSPI"), _regime_status("S&P500")] if r]
-            both_strong = all(
-                ("강세" in r) for r in regime_lines
-            ) if regime_lines else False
-            any_weak = any(("약세" in r) for r in regime_lines)
-            if regime_lines:
-                badge_class = "signal-buy" if both_strong else (
-                    "signal-none" if any_weak else "signal-hold"
+            # ── 시장 체제 (KOSPI / KOSDAQ / S&P500) — 스캐너 벤치마크 국면 ──
+            # 국면이 등급 판정에 자동 반영됨:
+            #   조정(50일선 아래) → 상대RS+매집 확인 종목만 A급
+            #   하락추세(200일선 아래) → 조정장돌파 최상급만 A급, 나머지는 관찰(B)
+            _mkt_ctx = st.session_state.get("scanner_mkt_ctx") or {}
+            _regime_advice = {
+                "상승추세": "정상 매수",
+                "조정": "상대RS·기관매집 확인 종목만 A급",
+                "하락추세": "신규 매수 관찰만 — 조정장돌파 최상급만 예외",
+            }
+            _ctx_items = [(n, _mkt_ctx.get(k)) for n, k in
+                          (("KOSPI", ".KS"), ("KOSDAQ", ".KQ"), ("S&P500", "US"))]
+            _ctx_items = [(n, c) for n, c in _ctx_items if c and c.get("regime")]
+            if _ctx_items:
+                _regimes = [c["regime"] for _, c in _ctx_items]
+                badge_class = (
+                    "signal-buy" if all(r == "상승추세" for r in _regimes)
+                    else "signal-none" if "하락추세" in _regimes
+                    else "signal-hold"
                 )
-                regime_advice = (
-                    "적극 매매" if both_strong else
-                    "신규 매수 중단·현금 확대 권고" if any_weak else
-                    "선별 매수"
+                _lines = "<br>".join(
+                    f"{n}: <b>{c['regime']}</b> "
+                    f"(50일선 {(c['price']/c['ma50']-1)*100:+.1f}% · "
+                    f"200일선 {(c['price']/c['ma200']-1)*100:+.1f}%) — "
+                    f"{_regime_advice.get(c['regime'], '')}"
+                    for n, c in _ctx_items
                 )
                 st.markdown(f"""
 <div class="{badge_class}">
-<b>시장 체제</b> — {regime_advice}<br>
-{('<br>'.join(regime_lines))}
+<b>시장 체제 — 국면별 A급 기준 자동 적용</b><br>
+{_lines}
 </div>""", unsafe_allow_html=True)
 
             # ── 거래대금 표시 헬퍼 ───────────────
@@ -1148,8 +1151,15 @@ strict 필터 동시 만족 종목 없음.<br>
 
             st.markdown("---")
 
-            # ── 섹터별 대장주 ─────────────────
-            for sr in sector_results:
+            # ── 섹터별 대장주 — 시장별 분리 표시 ──────
+            _mkt_headers = (("KR", "🇰🇷 한국 강세 섹터"), ("US", "🇺🇸 미국 강세 섹터"))
+            for _mkt, _mkt_label in _mkt_headers:
+              _mkt_srs = [sr for sr in sector_results
+                          if getattr(sr, "market", "") == _mkt]
+              if not _mkt_srs:
+                  continue
+              st.markdown(f"##### {_mkt_label}")
+              for sr in _mkt_srs:
                 st.markdown(f"""
 <div class="signal-buy">
 <b>#{sr.rank} {sr.name}</b> &nbsp; RS {sr.rs:+.0f}
@@ -1181,17 +1191,24 @@ strict 필터 동시 만족 종목 없음.<br>
                 else:
                     st.caption("조건 충족 종목 없음")
 
-            # 전체 섹터 RS (접이식)
-            with st.expander("전체 섹터 RS 랭킹"):
-                for i, (name, rs, _) in enumerate(all_sectors, 1):
-                    bar = "█" * max(int(rs / 10), 0)
-                    st.markdown(f"`{i:>2d}. {name:<12s} RS {rs:>+6.0f}` {bar}")
+            # 전체 섹터 RS (접이식) — 시장별 분리 랭킹
+            with st.expander("전체 섹터 RS 랭킹 (시장별)"):
+                for _mkt, _mkt_label in (("KR", "한국 (1개월 모멘텀 가중 — 테마 순환 반영)"),
+                                         ("US", "미국 (3·6개월 — 추세 지속성 반영)")):
+                    rows = [(n, r) for (n, r, mm) in all_sectors if mm == _mkt]
+                    if not rows:
+                        continue
+                    st.markdown(f"**{_mkt_label}**")
+                    for i, (name, rs) in enumerate(rows, 1):
+                        bar = "█" * max(int(rs / 10), 0)
+                        st.markdown(f"`{i:>2d}. {name:<12s} RS {rs:>+6.0f}` {bar}")
         else:
             st.markdown("""
 <div class="signal-none">
 '섹터 스캔' 버튼을 눌러주세요.<br>
-10개 섹터 RS → 상위 4개 → 대장주 추출<br>
-<small>(한국+미국 약 100종목, 2~3분 소요)</small>
+시장별(한국/미국) 섹터 RS → 각 상위 3개 → 해당 시장 대장주 추출<br>
+<small>한국은 1개월 모멘텀 가중(테마 순환), 미국은 3·6개월(추세 지속) 기준.<br>
+시장 국면(조정/하락추세)에 따라 A급 기준이 자동으로 엄격해집니다. (2~3분 소요)</small>
 </div>""", unsafe_allow_html=True)
 
     # ── 오른쪽: 보유 종목 + 계산기 ────────────────

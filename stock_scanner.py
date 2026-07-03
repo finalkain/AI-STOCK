@@ -70,7 +70,7 @@ SECTORS = {
         ],
     },
     "2차전지": {
-        "etf": {"kr": "305540.KS"},
+        "etf": {"kr": "305540.KS", "us": "LIT"},  # Global X Lithium
         "stocks": [
             ("373220.KS", "LG에너지솔루션"), ("006400.KS", "삼성SDI"),
             ("051910.KS", "LG화학"), ("003670.KS", "포스코퓨처엠"),
@@ -83,7 +83,7 @@ SECTORS = {
         ],
     },
     "바이오": {
-        "etf": {"us": "XBI"},
+        "etf": {"kr": "244580.KS", "us": "XBI"},  # KODEX 바이오
         "stocks": [
             ("207940.KS", "삼성바이오로직스"), ("068270.KS", "셀트리온"),
             # 중소형 바이오
@@ -95,7 +95,7 @@ SECTORS = {
         ],
     },
     "IT·소프트웨어": {
-        "etf": {"us": "XLK"},
+        "etf": {"kr": "157490.KS", "us": "XLK"},  # TIGER 소프트웨어
         "stocks": [
             ("035420.KS", "NAVER"), ("035720.KS", "카카오"),
             # 중소형
@@ -107,7 +107,7 @@ SECTORS = {
         ],
     },
     "에너지·원자재": {
-        "etf": {"us": "XLE"},
+        "etf": {"kr": "117460.KS", "us": "XLE"},  # KODEX 에너지화학
         "stocks": [
             ("010950.KS", "S-Oil"), ("010130.KS", "고려아연"),
             ("XOM", "ExxonMobil"), ("CVX", "Chevron"), ("COP", "ConocoPhillips"),
@@ -122,7 +122,7 @@ SECTORS = {
         ],
     },
     "소비·엔터": {
-        "etf": {"us": "XLY"},
+        "etf": {"kr": "228810.KS", "us": "XLY"},  # TIGER 미디어컨텐츠
         "stocks": [
             ("352820.KS", "하이브"), ("003490.KS", "대한항공"),
             ("TSLA", "Tesla"), ("AMZN", "Amazon"), ("COST", "Costco"),
@@ -130,7 +130,7 @@ SECTORS = {
     },
     # ── 확장 섹터 (10개 추가) ──────────────────
     "원전": {
-        "etf": {"us": "URA"},
+        "etf": {"kr": "434730.KS", "us": "URA"},  # HANARO 원자력iSelect
         "stocks": [
             ("034020.KS", "두산에너빌리티"), ("052690.KS", "한전기술"),
             ("009770.KS", "한전KPS"),
@@ -149,7 +149,7 @@ SECTORS = {
         ],
     },
     "로봇·자동화": {
-        "etf": {"us": "ROBO"},
+        "etf": {"kr": "445290.KS", "us": "ROBO"},  # KODEX K-로봇액티브
         "stocks": [
             ("277810.KQ", "레인보우로보틱스"),
             ("GE", "GE Aerospace"), ("HON", "Honeywell"),
@@ -163,28 +163,28 @@ SECTORS = {
         ],
     },
     "헬스케어": {
-        "etf": {"us": "XLV"},
+        "etf": {"kr": "266420.KS", "us": "XLV"},  # KODEX 헬스케어
         "stocks": [
             ("207940.KS", "삼성바이오로직스"), ("000100.KS", "유한양행"),
             ("UNH", "UnitedHealth"), ("JNJ", "J&J"),
         ],
     },
     "건설·인프라": {
-        "etf": {"us": "ITB"},
+        "etf": {"kr": "117700.KS", "us": "ITB"},  # KODEX 건설
         "stocks": [
             ("000720.KS", "현대건설"), ("028260.KS", "삼성물산"),
             ("294870.KS", "HDC현대산업"), ("CAT", "Caterpillar"),
         ],
     },
     "철강·소재": {
-        "etf": {"us": "SLX"},
+        "etf": {"kr": "117680.KS", "us": "SLX"},  # KODEX 철강
         "stocks": [
             ("005490.KS", "POSCO홀딩스"), ("004020.KS", "현대제철"),
             ("NEM", "Newmont"),
         ],
     },
     "인터넷·게임": {
-        "etf": {},
+        "etf": {"kr": "365040.KS"},  # TIGER KRX게임K-뉴딜
         "stocks": [
             ("259960.KS", "크래프톤"), ("036570.KS", "엔씨소프트"),
             ("251270.KS", "넷마블"),
@@ -196,7 +196,7 @@ SECTORS = {
         ],
     },
     "자동차·자율주행": {
-        "etf": {"us": "DRIV"},
+        "etf": {"kr": "091180.KS", "us": "DRIV"},  # KODEX 자동차
         "stocks": [
             ("005380.KS", "현대차"), ("000270.KS", "기아"),
             ("012330.KS", "현대모비스"), ("204320.KS", "HL만도"),
@@ -234,6 +234,14 @@ B_STOP_MAX = 10.0
 # ── B-급 (경고) 트리거 ────────────────────────────
 WARN_GAP_MIN = 3.0                  # 갭 > 3% AND
 WARN_VOL_MAX = 1.0                  # 거래량 < 1.0x → B- 경고
+
+# ── 시장별 특성 상수 ──────────────────────────────
+# 한국: 테마 순환 빠름·개인 수급 비중 큼·상하한가 ±30% → 변동성 여유를 두되
+#       동전주와 국면 악화 시 일반 돌파를 걸러낸다.
+# 미국: 추세 지속성 길고 대형주 변동성 낮음 → 손절거리를 타이트하게.
+A_STOP_MAX_US = 7.0                 # 미국주 A급 손절거리 ≤ 7% (한국주는 A_STOP_MAX=8%)
+KR_PRICE_MIN = 1_000                # 한국 동전주(<1,000원) 제외 — 작전·유통물량 리스크
+US_PRICE_MIN = 10.0                 # 미국 저가주(<$10) 제외 — 미너비니 기준
 
 # 호환 alias (기존 코드/UI 깨지지 않게)
 ATR_PCT_MAX = A_ATR_MAX
@@ -323,6 +331,7 @@ class StockScore:
     ud_vol_ratio: float = 1.0                   # 상승일/하락일 거래량 비 (≥1.5 = 기관 매집)
     down_market_breakout: bool = False          # 시장 조정 중인데 돌파 = 최상급 셋업(burge out)
     market_weak: bool = False                   # 해당 종목 벤치마크 지수가 조정·하락 국면
+    market_regime: str = ""                     # 벤치마크 국면: 상승추세 / 조정 / 하락추세
 
     @property
     def signal(self):
@@ -344,6 +353,11 @@ class StockScore:
         return self.turnover_20d >= threshold
 
     @property
+    def price_ok(self):
+        """동전주(한국 <1,000원)·저가주(미국 <$10) 제외"""
+        return self.price >= (KR_PRICE_MIN if self.is_kr else US_PRICE_MIN)
+
+    @property
     def fundamentals_ok(self):
         """매출·영익 YoY 임계 통과 (DART 미사용 시 True 유지)"""
         return self.fundamentals_pass
@@ -360,7 +374,9 @@ class StockScore:
 
     @property
     def stop_ok(self):
-        return self.stop_distance_pct <= A_STOP_MAX
+        """A급 손절거리 — 미국주는 저변동 특성상 7%로 타이트, 한국주 8%"""
+        limit = A_STOP_MAX if self.is_kr else A_STOP_MAX_US
+        return self.stop_distance_pct <= limit
 
     @property
     def position_ok(self):
@@ -383,12 +399,13 @@ class StockScore:
         B-: 갭 + 거래량 동시 부족 경고
         None: 후보 미달
         """
-        # 공통 베이스 — 추세·돌파·유동성·공시
+        # 공통 베이스 — 추세·돌파·유동성·공시·가격대
         base = (
             self.stage2
             and (self.breakout_20d or self.breakout_55d)
             and self.liquidity_ok
             and self.disclosure_ok
+            and self.price_ok
         )
         if not base:
             return None
@@ -402,9 +419,22 @@ class StockScore:
             and self.volume_ratio >= A_VOL_MIN
             and self.extended_pct <= A_PIVOT_MAX
             and self.atr_pct <= A_ATR_MAX
-            and self.stop_distance_pct <= A_STOP_MAX
+            and self.stop_ok
             and self.fundamentals_ok
         )
+
+        # ── 시장 국면 적응 (트레이딩 노트: 하락장 RS주는 '매수'가 아니라 '관찰') ──
+        # 하락추세(지수 200일선 아래): 일반 돌파는 실패 확률이 높아 A급 불가.
+        #   단, 조정장돌파 + 강한 상대RS + 뚜렷한 기관매집의 최상급 셋업만 예외
+        #   (소액 테스트 매수 구간 — 지수 반등 + 피벗 돌파 조합).
+        # 조정(지수 50일선 아래): 시장 대비 상대강도·매집이 확인된 종목만 A급.
+        if a_pass and self.market_regime == "하락추세":
+            a_pass = (self.down_market_breakout
+                      and self.rs_rel >= REL_RS_STRONG
+                      and self.ud_vol_ratio >= ACC_STRONG)
+        elif a_pass and self.market_weak:
+            a_pass = (self.rs_rel >= REL_RS_MIN
+                      and self.ud_vol_ratio >= ACC_MIN)
         b_pass = (
             self.gap_pct <= B_GAP_MAX
             and self.volume_ratio >= B_VOL_MIN
@@ -574,6 +604,7 @@ class StockScore:
         return (self.stage2
                 and self.liquidity_ok
                 and self.disclosure_ok
+                and self.price_ok
                 and self.ext_from_ma50 <= 20.0
                 and RESERVE_GAP_MIN <= self.pivot_gap_pct <= RESERVE_GAP_MAX
                 and self.atr_pct <= B_ATR_MAX)
@@ -607,6 +638,7 @@ class SectorResult:
     name: str
     rs: float
     rank: int
+    market: str = ""                             # "KR" / "US" — 시장별 분리 랭킹
     leaders: list = field(default_factory=list)  # list[StockScore]
     reserve: list = field(default_factory=list)  # 돌파 대기 — 예약 매수 후보
 
@@ -720,9 +752,11 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None,
         if bench:
             rs_rel = ((s_r3m - bench["r3m"]) * 2 + (s_r6m - bench["r6m"])) * 100
             market_weak = bool(bench["weak"])
+            market_regime = bench.get("regime", "")
         else:
             rs_rel = (s_r3m * 2 + s_r6m) * 100
             market_weak = False
+            market_regime = ""
 
         # ── 기관 매집 — 상승일 거래량 vs 하락일 거래량 (U/D Volume) ──
         # 매집 종목은 하락일에 거래량이 마르고 상승일에 실린다.
@@ -825,6 +859,7 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None,
             ud_vol_ratio=round(ud_vol_ratio, 2),
             down_market_breakout=down_market_breakout,
             market_weak=market_weak,
+            market_regime=market_regime,
         )
     except Exception:
         return None
@@ -834,10 +869,12 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None,
 _MKT_CTX_CACHE = {}
 
 def _index_ctx(index_ticker):
-    """지수의 상대RS 기준선과 조정장 여부.
-    r3m/r6m = 3·6개월 수익률, weak = 지수가 50일선 아래(조정·하락 국면)."""
+    """지수의 상대RS 기준선과 시장 국면.
+    r3m/r6m = 3·6개월 수익률, weak = 지수가 50일선 아래(조정·하락 국면).
+    regime = 상승추세(50일선 위) / 조정(50일선 아래·200일선 위) / 하락추세(200일선 아래)
+    — 트레이딩 노트 기준: 하락추세에서 일반 돌파는 매수가 아니라 관찰."""
     try:
-        d = yf.download(index_ticker, period="1y", progress=False)
+        d = yf.download(index_ticker, period="2y", progress=False)
         if isinstance(d.columns, pd.MultiIndex):
             d.columns = d.columns.get_level_values(0)
         c = d["Close"].values.astype(float)
@@ -846,7 +883,16 @@ def _index_ctx(index_ticker):
         r3m = (c[-1] / c[-63] - 1)
         r6m = (c[-63] / c[-126] - 1)
         ma = float(np.mean(c[-MKT_WEAK_MA:]))
-        return {"r3m": r3m, "r6m": r6m, "weak": bool(c[-1] < ma)}
+        ma200 = float(np.mean(c[-200:])) if len(c) >= 200 else float(np.mean(c))
+        weak = bool(c[-1] < ma)
+        if c[-1] < ma200:
+            regime = "하락추세"
+        elif weak:
+            regime = "조정"
+        else:
+            regime = "상승추세"
+        return {"r3m": r3m, "r6m": r6m, "weak": weak, "regime": regime,
+                "price": float(c[-1]), "ma50": ma, "ma200": ma200}
     except Exception:
         return None
 
@@ -875,29 +921,73 @@ def _bench_for(ticker, market_ctx):
     return market_ctx.get("US")
 
 
-def _sector_rs(tickers_dict):
-    best = -999
-    for region, tk in tickers_dict.items():
-        if not tk: continue
-        try:
-            d = yf.download(tk, period="1y", progress=False)
-            if isinstance(d.columns, pd.MultiIndex):
-                d.columns = d.columns.get_level_values(0)
-            if not d.empty and len(d) > 126:
-                c = d["Close"].values.astype(float)
-                r3m = (c[-1] / c[-63] - 1) * 2
-                r6m = (c[-63] / c[-126] - 1)
-                best = max(best, (r3m + r6m) * 100)
-        except:
-            pass
-    return best if best > -999 else 0
+def _is_kr_ticker(tk):
+    return tk.endswith(".KS") or tk.endswith(".KQ")
 
 
-def scan_sectors(top_n=4, leaders_per_sector=3, progress_callback=None,
+def _in_market(tk, market):
+    return _is_kr_ticker(tk) if market == "KR" else not _is_kr_ticker(tk)
+
+
+def _mom_score(c, market):
+    """시장별 모멘텀 가중 — 시장 성격이 달라 같은 창으로 재면 왜곡된다.
+    US: 3·6개월 (기존 방식) — 미국은 추세 지속성이 길어 중기 모멘텀이 유효.
+    KR: 1개월 가중 추가 — 한국은 테마 순환이 빨라 최근 모멘텀을 반영하지
+        않으면 이미 정점을 지난 섹터가 계속 상위에 남는다."""
+    r1m = (c[-1] / c[-21] - 1) if len(c) > 21 else 0
+    r3m = (c[-1] / c[-63] - 1) if len(c) > 63 else 0
+    r6m = (c[-63] / c[-126] - 1) if len(c) > 126 else 0
+    if market == "KR":
+        return (r1m * 2 + r3m * 1.5 + r6m * 0.5) * 100
+    return (r3m * 2 + r6m) * 100
+
+
+def _download_closes(tk, period="1y"):
+    try:
+        d = yf.download(tk, period=period, progress=False)
+        if isinstance(d.columns, pd.MultiIndex):
+            d.columns = d.columns.get_level_values(0)
+        if d.empty:
+            return None
+        c = d["Close"].values.astype(float)
+        return c if len(c) > 63 else None
+    except Exception:
+        return None
+
+
+def _sector_rs_market(info, market):
+    """시장별 섹터 RS — 해당 시장 ETF 우선, 없으면 대표 구성종목 중앙값.
+    (기존: 한/미 ETF 중 max → 미국 ETF 강세만으로 한국 종목이 추출되는
+    교차 오염이 있어 시장별로 완전 분리)"""
+    key = "kr" if market == "KR" else "us"
+    tk = info.get("etf", {}).get(key)
+    if tk:
+        c = _download_closes(tk)
+        if c is not None:
+            return _mom_score(c, market)
+    # ETF 미확보 시 해당 시장 대표 구성종목(앞쪽 최대 3개) 중앙값으로 대체
+    scores = []
+    for t, _name in info["stocks"]:
+        if not _in_market(t, market):
+            continue
+        c = _download_closes(t)
+        if c is not None:
+            scores.append(_mom_score(c, market))
+        if len(scores) >= 3:
+            break
+    return float(np.median(scores)) if scores else None
+
+
+def scan_sectors(top_n=3, leaders_per_sector=3, progress_callback=None,
                  dart_api_key=None):
     """
-    1. 전 섹터 RS 계산 → 상위 top_n개
-    2. 상위 섹터의 개별 종목 스캔 → 대장주 leaders_per_sector개
+    시장별(한국/미국) 분리 스캔:
+    1. 시장별로 전 섹터 RS 계산 → 각 시장 상위 top_n개
+    2. 상위 섹터 안에서 '그 시장 소속 종목만' 스캔 → 대장주 leaders_per_sector개
+
+    반환:
+      results: list[SectorResult] — market 필드("KR"/"US")로 구분
+      sector_scores: list[(sector_name, rs, market)] — 시장별 전체 랭킹
 
     dart_api_key 가 주어지면 한국 종목에 한해 DART 펀더멘털·공시 필터를 추가 적용.
     """
@@ -915,62 +1005,82 @@ def scan_sectors(top_n=4, leaders_per_sector=3, progress_callback=None,
             corp_code_map = None
             dart_api_key = None  # 이후 호출 차단
 
-    # 시장 벤치마크 컨텍스트 — 상대RS·조정장 판정용 (스캔당 1회)
+    # 시장 벤치마크 컨텍스트 — 상대RS·시장 국면 판정용 (스캔당 1회)
     market_ctx = get_market_ctx(force=True)
 
-    # Step 1: 섹터 RS 랭킹
-    sector_scores = []
-    total_sectors = len(SECTORS)
-    for i, (sector_name, info) in enumerate(SECTORS.items()):
+    markets = ("KR", "US")
+
+    # Step 1: 시장별 섹터 RS 랭킹 — 해당 시장에 종목이 있는 섹터만
+    rank_tasks = [
+        (sector_name, info, m)
+        for sector_name, info in SECTORS.items()
+        for m in markets
+        if any(_in_market(t, m) for t, _ in info["stocks"])
+    ]
+    ranked = {m: [] for m in markets}
+    for i, (sector_name, info, m) in enumerate(rank_tasks):
         if progress_callback:
             progress_callback(
-                (i + 1) / (total_sectors + 10),
-                f"섹터 RS: {sector_name}"
+                (i + 1) / (len(rank_tasks) + 30),
+                f"섹터 RS [{m}]: {sector_name}"
             )
-        rs = _sector_rs(info["etf"])
-        sector_scores.append((sector_name, rs, info))
+        rs = _sector_rs_market(info, m)
+        if rs is not None:
+            ranked[m].append((sector_name, rs, info))
+    for m in markets:
+        ranked[m].sort(key=lambda x: x[1], reverse=True)
 
-    sector_scores.sort(key=lambda x: x[1], reverse=True)
+    sector_scores = [(name, rs, m)
+                     for m in markets
+                     for (name, rs, _info) in ranked[m]]
 
-    # Step 2: 상위 섹터 내 종목 스캔
+    # Step 2: 시장별 상위 섹터 내 '해당 시장' 종목 스캔
     results = []
-    top_sectors = sector_scores[:top_n]
-    stock_total = sum(len(s[2]["stocks"]) for s in top_sectors)
+    top = {m: ranked[m][:top_n] for m in markets}
+    stock_total = sum(
+        sum(1 for t, _ in info["stocks"] if _in_market(t, m))
+        for m in markets for (_n, _rs, info) in top[m]
+    ) or 1
     stock_done = 0
+    base_prog = len(rank_tasks)
 
-    for rank, (sector_name, rs, info) in enumerate(top_sectors, 1):
-        leaders = []
-        for ticker, name in info["stocks"]:
-            stock_done += 1
-            if progress_callback:
-                progress_callback(
-                    (total_sectors + stock_done) / (total_sectors + stock_total),
-                    f"{sector_name}: {name}"
+    for m in markets:
+        for rank, (sector_name, rs, info) in enumerate(top[m], 1):
+            leaders = []
+            for ticker, name in info["stocks"]:
+                if not _in_market(ticker, m):
+                    continue
+                stock_done += 1
+                if progress_callback:
+                    progress_callback(
+                        (base_prog + stock_done * 30 / stock_total) / (base_prog + 30),
+                        f"[{m}] {sector_name}: {name}"
+                    )
+                s = _score_stock(
+                    ticker, name,
+                    dart_api_key=dart_api_key,
+                    corp_code_map=corp_code_map,
+                    market_ctx=market_ctx,
                 )
-            s = _score_stock(
-                ticker, name,
-                dart_api_key=dart_api_key,
-                corp_code_map=corp_code_map,
-                market_ctx=market_ctx,
+                if s and s.score >= 30:
+                    leaders.append(s)
+
+            leaders.sort(key=lambda x: x.score, reverse=True)
+
+            # 돌파 대기 — 예약 매수 후보 (피벗 아래 베이스, 아직 미돌파)
+            reserve = sorted(
+                [s for s in leaders if s.is_reserve_candidate],
+                key=lambda x: (x.pivot_gap_pct, -x.score),  # 피벗에 가까운 순
+                reverse=True,
             )
-            if s and s.score >= 30:
-                leaders.append(s)
 
-        leaders.sort(key=lambda x: x.score, reverse=True)
-
-        # 돌파 대기 — 예약 매수 후보 (피벗 아래 베이스, 아직 미돌파)
-        reserve = sorted(
-            [s for s in leaders if s.is_reserve_candidate],
-            key=lambda x: (x.pivot_gap_pct, -x.score),  # 피벗에 가까운 순
-            reverse=True,
-        )
-
-        results.append(SectorResult(
-            name=sector_name,
-            rs=rs,
-            rank=rank,
-            leaders=leaders[:leaders_per_sector],
-            reserve=reserve[:12],
-        ))
+            results.append(SectorResult(
+                name=sector_name,
+                rs=rs,
+                rank=rank,
+                market=m,
+                leaders=leaders[:leaders_per_sector],
+                reserve=reserve[:12],
+            ))
 
     return results, sector_scores
