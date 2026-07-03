@@ -283,6 +283,15 @@ ACC_STRONG = 1.5                 # 상승일 거래량 / 하락일 거래량 ≥
 ACC_MIN = 1.1                   # ≥ 1.1 → 매집 우위
 MKT_WEAK_MA = 50                 # 지수가 N일선 아래면 시장 조정·하락 국면
 
+# ── 동일가중(브레드스) 벤치마크 — 초대형주 착시 보정 ──
+# KOSPI는 삼성전자·SK하이닉스 등 초대형 반도체가 지수의 30%+를 차지해
+# 시총가중 지수만으로는 '평균 종목'의 국면을 오판한다
+# (예: 지수 6개월 +96%인데 동일가중은 50일선 아래 조정).
+# 동일가중 ETF로 국면을 하향 보정하고, 상대RS 기준선도 '평균 종목'으로 잡는다.
+# 미국도 매그니피센트 쏠림이 같은 구조라 대칭 적용.
+BREADTH_ETF = {".KS": "252650.KS",   # KODEX 200 동일가중
+               "US": "RSP"}          # Invesco S&P500 Equal Weight
+
 
 @dataclass
 class StockScore:
@@ -897,16 +906,46 @@ def _index_ctx(index_ticker):
         return None
 
 
+def _blend_breadth(base, eq):
+    """시총가중 지수 국면을 동일가중(평균 종목) 기준으로 하향 보정.
+    - 지수 상승추세인데 동일가중이 50일선 아래 → 조정 (초대형주 착시)
+    - 지수 조정인데 동일가중이 200일선 아래 → 하락추세
+    상향 보정은 하지 않는다 (보수적 — 지수 약세는 그 자체로 매도 압력).
+    상대RS 기준선(r3m/r6m)도 '평균 종목' 수익률로 교체 — 초대형주가
+    끌어올린 지수 대비로 재면 조정장 A급 게이트(상대RS≥10)가 사실상
+    통과 불가능해지고, 반대로 평균 종목 대비면 기준이 원래 의도대로 작동."""
+    if not base:
+        return base
+    out = dict(base)
+    if not eq:
+        return out
+    out["eq_regime"] = eq["regime"]
+    out["eq_ma50_gap"] = eq["price"] / eq["ma50"] - 1
+    out["r3m"], out["r6m"] = eq["r3m"], eq["r6m"]
+    adjusted = False
+    if base["regime"] == "상승추세" and eq["weak"]:
+        out["regime"], out["weak"], adjusted = "조정", True, True
+    elif base["regime"] == "조정" and eq["regime"] == "하락추세":
+        out["regime"], adjusted = "하락추세", True
+    out["breadth_adjusted"] = adjusted
+    return out
+
+
 def get_market_ctx(force=False):
     """KR(KOSPI/KOSDAQ)·US(S&P500) 벤치마크 컨텍스트 — 스캔 1회당 1번만 조회.
-    score 계산에 시장 대비 상대강도와 조정장 여부를 주입하기 위함."""
+    score 계산에 시장 대비 상대강도와 조정장 여부를 주입하기 위함.
+    동일가중 ETF가 있는 시장(KOSPI·S&P500)은 초대형주 착시를 보정한다."""
     if _MKT_CTX_CACHE and not force:
         return _MKT_CTX_CACHE
-    _MKT_CTX_CACHE.update({
+    ctx = {
         ".KS": _index_ctx("^KS11"),   # KOSPI
         ".KQ": _index_ctx("^KQ11"),   # KOSDAQ
         "US":  _index_ctx("^GSPC"),   # S&P500
-    })
+    }
+    for key, etf in BREADTH_ETF.items():
+        ctx[key] = _blend_breadth(ctx.get(key), _index_ctx(etf))
+    _MKT_CTX_CACHE.clear()
+    _MKT_CTX_CACHE.update(ctx)
     return _MKT_CTX_CACHE
 
 

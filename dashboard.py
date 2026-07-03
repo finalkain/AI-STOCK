@@ -930,13 +930,27 @@ def main():
                     else "signal-none" if "하락추세" in _regimes
                     else "signal-hold"
                 )
-                _lines = "<br>".join(
-                    f"{n}: <b>{c['regime']}</b> "
-                    f"(50일선 {(c['price']/c['ma50']-1)*100:+.1f}% · "
-                    f"200일선 {(c['price']/c['ma200']-1)*100:+.1f}%) — "
-                    f"{_regime_advice.get(c['regime'], '')}"
-                    for n, c in _ctx_items
-                )
+                def _regime_line(n, c):
+                    line = (
+                        f"{n}: <b>{c['regime']}</b> "
+                        f"(50일선 {(c['price']/c['ma50']-1)*100:+.1f}% · "
+                        f"200일선 {(c['price']/c['ma200']-1)*100:+.1f}%) — "
+                        f"{_regime_advice.get(c['regime'], '')}"
+                    )
+                    # 동일가중(평균 종목) 착시 보정 — 초대형주가 지수를 끌어올린 경우
+                    if c.get("breadth_adjusted"):
+                        line += (
+                            f"<br>&nbsp;&nbsp;└ <small>동일가중(평균 종목) 50일선 "
+                            f"{c['eq_ma50_gap']*100:+.1f}% — 초대형주 착시 보정 적용</small>"
+                        )
+                    elif c.get("eq_ma50_gap") is not None:
+                        line += (
+                            f"<br>&nbsp;&nbsp;└ <small>동일가중 50일선 "
+                            f"{c['eq_ma50_gap']*100:+.1f}% — 시장 폭 건전</small>"
+                        )
+                    return line
+
+                _lines = "<br>".join(_regime_line(n, c) for n, c in _ctx_items)
                 st.markdown(f"""
 <div class="{badge_class}">
 <b>시장 체제 — 국면별 A급 기준 자동 적용</b><br>
