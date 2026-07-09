@@ -282,6 +282,13 @@ ACC_WINDOW = 50                  # 기관 매집 판정 구간 (영업일)
 ACC_STRONG = 1.5                 # 상승일 거래량 / 하락일 거래량 ≥ 1.5 → 매집 뚜렷
 ACC_MIN = 1.1                   # ≥ 1.1 → 매집 우위
 MKT_WEAK_MA = 50                 # 지수가 N일선 아래면 시장 조정·하락 국면
+# ── 미너비니 아침 루틴 지표 (트레이딩 노트) ──────────
+# ① "in the hole" 반등: 약하게 열려 강하게 마감 = 장중 저점 수요
+# ② down-day 상대강도: 지수 하락일 한정 초과수익 = "시장 빠질 때 버팀"
+# 우선 지표로만 추가(스코어 가중 0) → 백테스트 검증 후 승격 여부 결정.
+INHOLE_CLOSE_MIN = 0.7           # 종가강도 ≥0.7 (고가 부근 마감)
+DOWN_DAY_RS_WINDOW = 25          # 하락일 상대강도 측정 구간 (영업일)
+DOWN_DAY_RS_STRONG = 0.5         # 하락일 평균 초과수익 ≥0.5%p → 역행 강세
 
 # ── 동일가중(브레드스) 벤치마크 — 초대형주 착시 보정 ──
 # KOSPI는 삼성전자·SK하이닉스 등 초대형 반도체가 지수의 30%+를 차지해
@@ -340,6 +347,8 @@ class StockScore:
     ud_vol_ratio: float = 1.0                   # 상승일/하락일 거래량 비 (≥1.5 = 기관 매집)
     down_market_breakout: bool = False          # 시장 조정 중인데 돌파 = 최상급 셋업(burge out)
     market_weak: bool = False                   # 해당 종목 벤치마크 지수가 조정·하락 국면
+    in_hole_reversal: bool = False              # 약하게 열려 강하게 마감 = 장중 저점 수요 (노트 ①)
+    down_day_rs: float = 0.0                    # 지수 하락일 한정 평균 초과수익 %p — "시장 빠질 때 버팀" (노트 ②)
     market_regime: str = ""                     # 벤치마크 국면: 상승추세 / 조정 / 하락추세
 
     @property
@@ -350,6 +359,8 @@ class StockScore:
         elif self.breakout_20d: parts.append("20일돌파")
         if self.stage2: parts.append("Stage2")
         if self.rs_rel >= REL_RS_STRONG: parts.append(f"상대RS+{self.rs_rel:.0f}")
+        # down_day_rs: 지표값은 보존하되 forward 엣지 미검증 → 신호 태그 미노출
+        if self.in_hole_reversal: parts.append("역행반등")
         if self.ud_vol_ratio >= ACC_STRONG: parts.append("기관매집")
         if self.volume_ratio >= 1.5: parts.append(f"거래량{self.volume_ratio:.1f}x")
         return " · ".join(parts) if parts else "대기"
@@ -783,6 +794,25 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None,
         # ── 조정장 돌파(burge out) — 시장 조정 중인데 신고가 돌파 = 최상급 ──
         down_market_breakout = bool(market_weak and (brk20 or brk55))
 
+        # ── 노트 ① "in the hole" 반등 — 약하게 열려 강하게 마감 = 장중 저점 수요 ──
+        # gap_absorbed(갭업 후 약한 마감=공급)의 정반대 = 수요 신호.
+        in_hole_reversal = bool(gap_pct <= 0
+                                and close_strength >= INHOLE_CLOSE_MIN
+                                and day_change_pct > 0)
+
+        # ── 노트 ② down-day 상대강도 — 지수 하락일 한정 초과수익 ──
+        # "SPY/QQQ 밀리는데 종목이 저점 지켜냄"을 하락일만 골라 정밀 측정.
+        down_day_rs = 0.0
+        if bench and bench.get("rets") is not None:
+            idx_rets = np.asarray(bench["rets"], dtype=float)
+            m = min(len(idx_rets), len(c) - 1)
+            if m >= 5:
+                s_rets = np.diff(c[-(m + 1):]) / c[-(m + 1):-1]
+                i_rets = idx_rets[-m:]
+                dn = i_rets < 0
+                if dn.any():
+                    down_day_rs = float(np.mean(s_rets[dn] - i_rets[dn]) * 100)
+
         score = 0
         if stage2: score += 30
         if brk55: score += 25
@@ -869,6 +899,8 @@ def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None,
             down_market_breakout=down_market_breakout,
             market_weak=market_weak,
             market_regime=market_regime,
+            in_hole_reversal=in_hole_reversal,
+            down_day_rs=round(down_day_rs, 2),
         )
     except Exception:
         return None
@@ -900,8 +932,11 @@ def _index_ctx(index_ticker):
             regime = "조정"
         else:
             regime = "상승추세"
+        # down-day 상대강도용 — 시총가중 지수(노트의 SPY/QQQ)의 최근 일별 수익률
+        w = DOWN_DAY_RS_WINDOW
+        rets = (np.diff(c[-(w + 1):]) / c[-(w + 1):-1]) if len(c) > w + 1 else None
         return {"r3m": r3m, "r6m": r6m, "weak": weak, "regime": regime,
-                "price": float(c[-1]), "ma50": ma, "ma200": ma200}
+                "price": float(c[-1]), "ma50": ma, "ma200": ma200, "rets": rets}
     except Exception:
         return None
 
