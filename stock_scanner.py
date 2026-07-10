@@ -663,11 +663,54 @@ class SectorResult:
     reserve: list = field(default_factory=list)  # 돌파 대기 — 예약 매수 후보
 
 
+# ── 가격 배치 프리페치 (레이트리밋 회피) ──────────────
+# 종목별 개별 yf.download는 요청 수가 많아(스캔당 ~95회) 공유 IP(Streamlit
+# Cloud)에서 yfinance 레이트리밋에 걸려 느려지거나 멈춘다. 한 번의 배치
+# 요청으로 수십 종목을 받아 캐시에 채우면 요청 수가 30배 이상 줄어든다.
+_PRICE_CACHE = {}
+
+def prefetch_prices(tickers, period="2y", chunk=50):
+    """공백 구분 배치 다운로드로 캐시를 채운다. 실패 종목은 개별 폴백."""
+    uniq = [t for t in dict.fromkeys(tickers) if t]
+    for i in range(0, len(uniq), chunk):
+        batch = uniq[i:i + chunk]
+        try:
+            d = yf.download(" ".join(batch), period=period, progress=False,
+                            group_by="ticker", threads=True)
+        except Exception:
+            continue
+        if d is None or d.empty:
+            continue
+        if isinstance(d.columns, pd.MultiIndex):
+            lvl0 = set(d.columns.get_level_values(0))
+            for tk in batch:
+                if tk in lvl0:
+                    sub = d[tk].dropna(how="all")
+                    if len(sub):
+                        _PRICE_CACHE[tk] = sub
+        elif len(batch) == 1:
+            _PRICE_CACHE[batch[0]] = d
+    return _PRICE_CACHE
+
+
+def _get_prices(ticker, period="2y"):
+    """캐시 우선 → 없으면 개별 다운로드. 컬럼은 단일 레벨로 정규화."""
+    d = _PRICE_CACHE.get(ticker)
+    if d is None:
+        d = yf.download(ticker, period=period, progress=False)
+    if d is None or d.empty:
+        return None
+    if isinstance(d.columns, pd.MultiIndex):
+        d = d.copy()
+        d.columns = d.columns.get_level_values(0)
+    return d
+
+
 def _score_stock(ticker, name, dart_api_key=None, corp_code_map=None,
                  market_ctx=None):
     try:
-        d = yf.download(ticker, period="2y", progress=False)
-        if d.empty or len(d) < 200:
+        d = _get_prices(ticker, "2y")
+        if d is None or d.empty or len(d) < 200:
             return None
         if isinstance(d.columns, pd.MultiIndex):
             d.columns = d.columns.get_level_values(0)
@@ -1018,10 +1061,8 @@ def _mom_score(c, market):
 
 def _download_closes(tk, period="1y"):
     try:
-        d = yf.download(tk, period=period, progress=False)
-        if isinstance(d.columns, pd.MultiIndex):
-            d.columns = d.columns.get_level_values(0)
-        if d.empty:
+        d = _get_prices(tk, period)   # 캐시(2y) 우선 → 개별 폴백
+        if d is None or d.empty:
             return None
         c = d["Close"].values.astype(float)
         return c if len(c) > 63 else None
@@ -1078,6 +1119,17 @@ def scan_sectors(top_n=3, leaders_per_sector=3, progress_callback=None,
                 progress_callback(0.02, f"DART 매핑 실패: {e} — 펀더멘털 필터 비활성")
             corp_code_map = None
             dart_api_key = None  # 이후 호출 차단
+
+    # 배치 프리페치 — 전 유니버스(종목+섹터ETF)를 몇 번의 요청으로 미리 받아
+    # 캐시에 채운다. 이후 _score_stock/_download_closes는 캐시를 읽어 개별
+    # 요청을 거의 없앤다(레이트리밋 회피, 스캔 대폭 가속).
+    if progress_callback:
+        progress_callback(0.03, "가격 배치 로딩...")
+    _prefetch_tks = []
+    for _info in SECTORS.values():
+        _prefetch_tks += [t for t, _ in _info["stocks"]]
+        _prefetch_tks += [v for v in _info.get("etf", {}).values()]
+    prefetch_prices(_prefetch_tks, period="2y")
 
     # 시장 벤치마크 컨텍스트 — 상대RS·시장 국면 판정용 (스캔당 1회)
     market_ctx = get_market_ctx(force=True)
