@@ -1,19 +1,42 @@
 {
-  "total_capital": 3123775,
-  "cash": 3123580,
-  "cash_usd": 4316.29,
+  "total_capital": 3094751,
+  "cash": 2877415,
+  "cash_usd": 3637.89,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
     {
-      "asset": "Lam Research Corp",
+      "asset": "신한지주",
+      "currency": "KRW",
+      "shares": 2,
+      "avg_price": 111000,
+      "current_value": 217800,
+      "kiwoom_stk_cd": "A055550",
+      "entry_date": "2026-07-13",
+      "trailing_stop": null,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
+      "asset": "AAPL",
       "currency": "USD",
       "shares": 2,
-      "avg_price": 301.715,
-      "current_value": 610.7,
-      "trailing_stop": 274.1,
-      "entry_date": "2026-05-25",
-      "note": "신규 매수 (LRCX, 미국)"
+      "avg_price": 317.17,
+      "current_value": 631.72,
+      "kiwoom_stk_cd": "AAPL",
+      "entry_date": "",
+      "trailing_stop": null,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
+      "asset": "SPCX",
+      "currency": "USD",
+      "shares": 6,
+      "avg_price": 150.35,
+      "current_value": 831.54,
+      "kiwoom_stk_cd": "SPCX",
+      "entry_date": "2026-07-10",
+      "trailing_stop": null,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     }
   ],
   "journal": [
@@ -506,5 +529,5 @@
       "kiwoom_stk_cd": "A055550"
     }
   ],
-  "total_capital_usd": 4926.99
+  "total_capital_usd": 5101.15
 }
