@@ -1,5 +1,5 @@
 {
-  "total_capital": 3094351,
+  "total_capital": 3094152,
   "cash": 2877415,
   "cash_usd": 3637.89,
   "margin_value": 1130400,
@@ -10,7 +10,7 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 111000,
-      "current_value": 217400,
+      "current_value": 217200,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-07-13",
       "trailing_stop": 0,
@@ -32,21 +32,10 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 831.0,
+      "current_value": 830.58,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
-      "asset": "AAPL",
-      "currency": "USD",
-      "shares": 2,
-      "avg_price": 317.17,
-      "current_value": 631.72,
-      "kiwoom_stk_cd": "AAPL",
-      "entry_date": "",
-      "trailing_stop": null,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     }
   ],
@@ -540,5 +529,5 @@
       "kiwoom_stk_cd": "A055550"
     }
   ],
-  "total_capital_usd": 5100.61
+  "total_capital_usd": 5100.19
 }
