@@ -70,7 +70,8 @@
       "price": 1844,
       "reason": "키움 자동 임포트",
       "kiwoom_ord_no": "0738674",
-      "kiwoom_stk_cd": "A114800"
+      "kiwoom_stk_cd": "A114800",
+      "pnl": 900
     },
     {
       "date": "2026-03-09",
@@ -92,7 +93,8 @@
       "price": 46000,
       "reason": "키움 자동 임포트",
       "kiwoom_ord_no": "0373154",
-      "kiwoom_stk_cd": "A403870"
+      "kiwoom_stk_cd": "A403870",
+      "pnl": 13250
     },
     {
       "date": "2026-03-11",
@@ -125,7 +127,8 @@
       "price": 50000,
       "reason": "키움 자동 임포트",
       "kiwoom_ord_no": "0126249",
-      "kiwoom_stk_cd": "A403870"
+      "kiwoom_stk_cd": "A403870",
+      "pnl": 71750
     },
     {
       "date": "2026-03-19",
@@ -210,7 +213,8 @@
       "price": 99700,
       "reason": "키움 자동 임포트",
       "kiwoom_ord_no": "0776578",
-      "kiwoom_stk_cd": "A034020"
+      "kiwoom_stk_cd": "A034020",
+      "pnl": 1700
     },
     {
       "date": "2026-04-14",
@@ -221,7 +225,8 @@
       "price": 30900,
       "reason": "키움 자동 임포트",
       "kiwoom_ord_no": "0768230",
-      "kiwoom_stk_cd": "A094170"
+      "kiwoom_stk_cd": "A094170",
+      "pnl": 3000
     },
     {
       "date": "2026-04-17",
@@ -371,9 +376,10 @@
       "currency": "KRW",
       "shares": 500,
       "price": 981,
-      "reason": "키움 자동 동기화",
+      "reason": "키움 자동 동기화 · 매도 981 - 평단 983 = -1,000원",
       "kiwoom_ord_no": "0524911",
-      "kiwoom_stk_cd": "A114800"
+      "kiwoom_stk_cd": "A114800",
+      "pnl": -1000
     },
     {
       "date": "2026-06-05",
@@ -382,9 +388,10 @@
       "currency": "KRW",
       "shares": 3,
       "price": 53200,
-      "reason": "키움 자동 동기화",
+      "reason": "키움 자동 동기화 · 매도 53,200 - 평단 62,000 = -26,400원",
       "kiwoom_ord_no": "0525825",
-      "kiwoom_stk_cd": "A403870"
+      "kiwoom_stk_cd": "A403870",
+      "pnl": -26400
     },
     {
       "date": "2026-06-08",
@@ -393,10 +400,11 @@
       "currency": "USD",
       "shares": 2,
       "price": 408.36,
-      "reason": "키움 자동 동기화 (브로드컴)",
+      "reason": "키움 자동 동기화 (브로드컴) · 매도 $408.36 - 평단 $442.60 = -68.48$",
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "AVGO",
-      "kiwoom_fee_usd": 2.04
+      "kiwoom_fee_usd": 2.04,
+      "pnl": -68.48
     },
     {
       "date": "2026-06-17",
@@ -405,10 +413,11 @@
       "currency": "USD",
       "shares": 2,
       "price": 587.23,
-      "reason": "키움 자동 동기화 (응용재료)",
+      "reason": "키움 자동 동기화 (응용재료) · 매도 $587.23 - 평단 $448.38 = +277.70$",
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "AMAT",
-      "kiwoom_fee_usd": 2.93
+      "kiwoom_fee_usd": 2.93,
+      "pnl": 277.7
     },
     {
       "date": "2026-06-18",
@@ -417,10 +426,11 @@
       "currency": "USD",
       "shares": 2,
       "price": 379.83,
-      "reason": "키움 자동 동기화 (램리서치)",
+      "reason": "키움 자동 동기화 (램리서치) · 매도 $379.83 - 평단 $301.71 = +156.23$",
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "LRCX",
-      "kiwoom_fee_usd": 1.89
+      "kiwoom_fee_usd": 1.89,
+      "pnl": 156.23
     },
     {
       "date": "2026-07-01",
@@ -453,10 +463,11 @@
       "currency": "USD",
       "shares": 1,
       "price": 606.96,
-      "reason": "키움 자동 동기화 (응용재료)",
+      "reason": "키움 자동 동기화 (응용재료) · 매도 $606.96 - 평단 $641.75 = -34.79$",
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "AMAT",
-      "kiwoom_fee_usd": 1.51
+      "kiwoom_fee_usd": 1.51,
+      "pnl": -34.79
     },
     {
       "date": "2026-07-07",
@@ -465,10 +476,11 @@
       "currency": "USD",
       "shares": 1,
       "price": 506.32,
-      "reason": "키움 자동 동기화 (AMD)",
+      "reason": "키움 자동 동기화 (AMD) · 매도 $506.32 - 평단 $564.12 = -57.80$",
       "kiwoom_deal_no": "000000002",
       "kiwoom_stk_cd": "AMD",
-      "kiwoom_fee_usd": 1.26
+      "kiwoom_fee_usd": 1.26,
+      "pnl": -57.8
     },
     {
       "date": "2026-07-10",
