@@ -1,5 +1,5 @@
 {
-  "total_capital": 3094751,
+  "total_capital": 3094351,
   "cash": 2877415,
   "cash_usd": 3637.89,
   "margin_value": 1130400,
@@ -10,10 +10,10 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 111000,
-      "current_value": 217800,
+      "current_value": 217400,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-07-13",
-      "trailing_stop": null,
+      "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -24,7 +24,7 @@
       "current_value": 631.72,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "",
-      "trailing_stop": null,
+      "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -32,9 +32,20 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 831.54,
+      "current_value": 831.0,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
+      "trailing_stop": 0,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
+      "asset": "AAPL",
+      "currency": "USD",
+      "shares": 2,
+      "avg_price": 317.17,
+      "current_value": 631.72,
+      "kiwoom_stk_cd": "AAPL",
+      "entry_date": "",
       "trailing_stop": null,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     }
@@ -529,5 +540,5 @@
       "kiwoom_stk_cd": "A055550"
     }
   ],
-  "total_capital_usd": 5101.15
+  "total_capital_usd": 5100.61
 }
