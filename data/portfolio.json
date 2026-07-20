@@ -1,7 +1,7 @@
 {
-  "total_capital": 3092755,
+  "total_capital": 3085569,
   "cash": 2877415,
-  "cash_usd": 3637.9,
+  "cash_usd": 3245.45,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,7 +10,7 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 111000,
-      "current_value": 215800,
+      "current_value": 208600,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-07-13",
       "trailing_stop": 0,
@@ -21,9 +21,20 @@
       "currency": "USD",
       "shares": 2,
       "avg_price": 317.17,
-      "current_value": 655.78,
+      "current_value": 668.26,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-07-15",
+      "trailing_stop": 0,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
+      "asset": "MRK",
+      "currency": "USD",
+      "shares": 3,
+      "avg_price": 130.49,
+      "current_value": 384.99,
+      "kiwoom_stk_cd": "MRK",
+      "entry_date": "",
       "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
@@ -32,7 +43,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 816.12,
+      "current_value": 757.14,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 0,
@@ -541,5 +552,5 @@
       "kiwoom_fee_usd": 1.58
     }
   ],
-  "total_capital_usd": 5109.8
+  "total_capital_usd": 5055.84
 }
