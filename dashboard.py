@@ -396,6 +396,33 @@ def breakout_plan_html(s):
     )
 
 
+# ── 보유 종목 매칭 — 신규 추천 리스트에서 제외용 ──────────
+def held_asset_keys(positions):
+    """positions → 보유 종목 식별 키 집합. asset명·키움코드·티커를 모두 등록해
+    스캐너 결과(티커/이름 표기가 다를 수 있음)와 안전하게 매칭한다."""
+    keys = set()
+    for p in positions:
+        if p.get("shares", 0) <= 0:
+            continue
+        for k in (p.get("asset"), p.get("kiwoom_stk_cd")):
+            if not k:
+                continue
+            k = str(k).strip().upper()
+            keys.add(k)
+            if len(k) == 7 and k[0] == "A" and k[1:].isdigit():
+                keys.add(k[1:])          # A055550 → 055550
+    return keys
+
+
+def is_held_stock(s, held_keys):
+    """StockScore가 보유 포지션과 동일 종목인지 — 티커(.KS/.KQ 제거)·이름으로 매칭."""
+    t = str(s.ticker).upper()
+    base = t.replace(".KS", "").replace(".KQ", "")
+    return (t in held_keys or base in held_keys
+            or ("A" + base) in held_keys
+            or str(s.name).strip().upper() in held_keys)
+
+
 # ── 상장 종목 유니버스 (이름·코드·티커 조회) ──────────
 UNIVERSE_DIR = Path(__file__).parent / "data"
 
@@ -625,6 +652,15 @@ def main():
     risk_amt = int(total_krw * pf["risk_pct"])       # KRW 거래용
     risk_amt_usd = round(total_usd * pf["risk_pct"], 2)  # USD 거래용
 
+    # 출혈(연속 손실·낙폭) 기반 신규 진입 베팅 한도 배수 — 스캔·후보 수량 계산에 반영
+    try:
+        from drawdown_tracker import realized_equity_metrics as _bm_fn, size_multiplier as _sm_fn
+        bet_mult, bet_note = _sm_fn(_bm_fn(
+            pf.get("journal", []), total_capital=max(total_krw, 1),
+            today=datetime.now()))
+    except Exception:
+        bet_mult, bet_note = 1.0, ""
+
     # ── 상단: 포트폴리오 + 리스크 관리 ──────────────
     st.markdown(f"### 추세추종 터미널 | {datetime.now().strftime('%Y-%m-%d')}")
 
@@ -755,18 +791,19 @@ def main():
     # 실현손익 곡선(journal FIFO)으로 신고점 낙폭·경과일·연속손절을 수치화하고
     # 한계선 초과 시 사이즈 축소/매매 중단을 권고한다.
     try:
-        from drawdown_tracker import realized_equity_metrics, assess
+        from drawdown_tracker import realized_equity_metrics, assess, size_multiplier
         _dd = realized_equity_metrics(
             pf.get("journal", []),
             total_capital=max(total_krw, 1),
             today=datetime.now(),
         )
         _st = assess(_dd)
+        _mult, _mult_note = size_multiplier(_dd)
         with st.expander(
             f"🩸 출혈 모니터 — {_st['status']} "
             f"(낙폭 -{_dd['drawdown_pct']:.1f}% · 신고점 {_dd['days_since_high']}일 전 · "
             f"연속손절 {_dd['consecutive_losses']}회)",
-            expanded=(_st["level"] >= 1),
+            expanded=(_st["level"] >= 1 or _mult < 1.0),
         ):
             dd_row = st.columns(4)
             dd_row[0].metric("실현 낙폭", f"-{_dd['drawdown_krw']:,.0f}원",
@@ -783,11 +820,16 @@ def main():
             banner = "signal-buy" if _st["level"] == 2 else (
                 "signal-none" if _st["level"] == 1 else "signal-hold")
             reasons_html = "<br>".join("· " + r for r in _st["reasons"])
+            _base_risk = int(max(total_krw, 1) * pf.get("risk_pct", 0.01))
+            if _mult < 1.0:
+                reasons_html += (
+                    f"<br>· 🎯 신규 진입 베팅 한도 <b>{int(_base_risk*_mult):,}원</b> "
+                    f"(기본 {_base_risk:,}원의 {_mult*100:.0f}%) — {_mult_note}")
             st.markdown(f"""
 <div class="{banner}">
 <b>{_st['status']}</b><br>
 {reasons_html}<br>
-<small>실현손익 누적 {_dd['realized_total']:+,.0f}원 · 청산 {_dd['closed_count']}건 (저널 기반, 평가손익 별도)</small>
+<small>실현손익 누적 {_dd['realized_total']:+,.0f}원 · 청산 {_dd['closed_count']}건 (저널 기반, 평가손익 별도 · 규칙 외 개인 종목 제외)</small>
 </div>""", unsafe_allow_html=True)
             st.caption(
                 "추세추종은 승률이 낮고 횡보장에서 잔손실이 누적됩니다. "
@@ -967,10 +1009,17 @@ def main():
                     return f"${s.turnover_20d/1e6:.0f}M"
                 return f"${s.turnover_20d/1e3:.0f}K"
 
+            # ── 보유 종목 제외 — 추가매수는 보유 카드의 Add-up(피라미딩) 규칙으로만 ──
+            _held = held_asset_keys(pf["positions"])
+            _excluded_held = set()
+
             # ── 등급별 분류: A / B / B- / 다음날 후보 ──
             a_list, b_list, warn_list, nextday_list = [], [], [], []
             for sr in sector_results:
                 for s in sr.leaders:
+                    if is_held_stock(s, _held):
+                        _excluded_held.add(s.name)
+                        continue
                     if s.tier == "A":
                         a_list.append((sr.name, s))
                     elif s.tier == "B-":
@@ -979,6 +1028,9 @@ def main():
                         b_list.append((sr.name, s))
                     if s.is_next_day_candidate:
                         nextday_list.append((sr.name, s))
+            # 상대강도 높은 순 (예약 플랜 우선순위에도 사용)
+            a_list.sort(key=lambda x: x[1].rs_rel, reverse=True)
+            nextday_list.sort(key=lambda x: x[1].rs_rel, reverse=True)
 
             # ── 예약 매수 후보 (돌파 대기) — 섹터 중복 제거 ──
             reserve_list, _seen_rsv = [], set()
@@ -987,6 +1039,9 @@ def main():
                     if s.ticker in _seen_rsv:
                         continue
                     _seen_rsv.add(s.ticker)
+                    if is_held_stock(s, _held):
+                        _excluded_held.add(s.name)
+                        continue
                     reserve_list.append((sr.name, s))
             # 피벗에 가까운 순 (돌파 임박 우선)
             reserve_list.sort(key=lambda x: x[1].pivot_gap_pct, reverse=True)
@@ -997,9 +1052,19 @@ def main():
                 for s in sr.leaders:
                     if getattr(s, "down_market_breakout", False) and s.ticker not in _seen_dbo:
                         _seen_dbo.add(s.ticker)
+                        if is_held_stock(s, _held):
+                            _excluded_held.add(s.name)
+                            continue
                         downbo_list.append((sr.name, s))
             # 시장 대비 상대강도 높은 순
             downbo_list.sort(key=lambda x: x[1].rs_rel, reverse=True)
+
+            if _excluded_held:
+                st.caption(
+                    "🔒 보유 중이라 신규 추천에서 제외: "
+                    + ", ".join(sorted(_excluded_held))
+                    + " — 추가매수는 보유 종목 카드의 Add-up(피라미딩) 규칙으로만"
+                )
 
             # ── KST 기반 시간대 인지 ───────────────
             from datetime import timezone, timedelta as _td
@@ -1027,9 +1092,30 @@ def main():
                 return f"<small>실적 매출 {rev} / 영익 {op}{loss}</small><br>"
 
 
+            _mult_tag = f" · 한도 {bet_mult*100:.0f}% 축소" if bet_mult < 1.0 else ""
+
+            def _reserve_qty_line(s):
+                """예약 매수가 기준 — 축소 한도 반영 매수 가능 주수·필요금액 라인."""
+                s_ccy = "KRW" if s.is_kr else "USD"
+                rp, stp = s.reserve_buy_price, s.reserve_stop
+                risk_ps = rp - stp
+                if rp <= 0 or risk_ps <= 0:
+                    return ""
+                s_risk = (risk_amt_usd if s_ccy == "USD" else risk_amt) * bet_mult
+                qty = int(s_risk / risk_ps)
+                if qty <= 0:
+                    return ('<span style="color:#c0392b;font-weight:600;">'
+                            '⛔ 한도 초과 — 1주 리스크가 축소 베팅 한도를 넘음, 예약 보류</span><br>')
+                s_cash = cash_usd if s_ccy == "USD" else cash
+                cost = qty * rp
+                afford = ("" if cost <= s_cash else
+                          f' · <span style="color:#c0392b;">현금부족(최대 {int(s_cash / rp)}주)</span>')
+                return (f'<b>💰 {qty}주 예약 가능</b> <small>= 리스크 {fmt_money(s_risk, s_ccy)}{_mult_tag} '
+                        f'÷ 주당 {fmt_money(risk_ps, s_ccy)} · 필요금액 {fmt_money(cost, s_ccy)}{afford}</small><br>')
+
             def _render_card(sector_name, s, show_qty=True):
                 s_ccy = "KRW" if s.is_kr else "USD"
-                s_risk = risk_amt_usd if s_ccy == "USD" else risk_amt
+                s_risk = (risk_amt_usd if s_ccy == "USD" else risk_amt) * bet_mult
                 stop = s.price - 2 * s.atr20
                 risk_ps = 2 * s.atr20
                 qty = int(s_risk / risk_ps) if risk_ps > 0 else 0
@@ -1037,13 +1123,77 @@ def main():
                 gap_str = f"{s.gap_pct:+.1f}%" if abs(s.gap_pct) >= 0.1 else "0%"
                 # 확장 종목은 현재가 기준 수량 안내가 오해를 부르므로 매수 구간으로 대체
                 qty_line = (
-                    f"손절: {fmt_money(stop, s_ccy)} (-{risk_ps/s.price*100:.1f}%) | {qty}주 매수 가능<br>"
+                    f"손절: {fmt_money(stop, s_ccy)} (-{risk_ps/s.price*100:.1f}%) | "
+                    f"{qty}주 매수 가능{_mult_tag}<br>"
                     if show_qty and not s.is_extended else ""
                 )
                 return f"""<div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · 거래량 {s.volume_ratio:.1f}x · 갭 {gap_str}<br>
 현재가: {fmt_money(s.price, s_ccy)} | {qty_line}{breakout_plan_html(s)}<small>상대RS {s.rs_rel:+.0f} · 매집 {s.ud_vol_ratio:.1f}x · 거래대금 {_fmt_turnover(s)} · ATR {s.atr_pct:.1f}% · 피벗+{s.extended_pct:.1f}% · [{s.filter_status}]</small><br>
 {_fmt_fund(s)}</div>"""
+
+            # ── 📋 오늘의 예약 매수 플랜 — 한도 내 자동 선별 ──
+            # 후보 전부를 살 수는 없다. 우선순위(조정장돌파 > A급 > 내일후보 > 돌파대기)
+            # 순으로 ① 통화별 현금 ② 하루 신규 리스크 한도(유닛 수 × 축소배수)를
+            # 차감해 가며 채워지는 종목만 ✅ 추천, 넘치면 ⏸ 예비로 표시만 한다.
+            MAX_NEW_UNITS_PER_DAY = 2
+            plan_rows, _seen_plan = [], set()
+            _prio_src = ([("① 조정장돌파", x) for x in downbo_list]
+                         + [("② A급", x) for x in a_list]
+                         + [("③ 내일후보", x) for x in nextday_list]
+                         + [("④ 돌파대기", x) for x in reserve_list])
+            for grade, (_sec, s) in _prio_src:
+                if s.ticker in _seen_plan or s.disclosure_risk:
+                    continue
+                if s.is_extended and s.breakout_state != "돌파 대기":
+                    continue          # 추격 금지 구간 — 예약 대상 아님
+                rp, stp = s.reserve_buy_price, s.reserve_stop
+                if rp <= 0 or rp - stp <= 0:
+                    continue
+                _seen_plan.add(s.ticker)
+                s_ccy = "KRW" if s.is_kr else "USD"
+                s_risk = (risk_amt_usd if s_ccy == "USD" else risk_amt) * bet_mult
+                qty = int(s_risk / (rp - stp))
+                plan_rows.append({
+                    "ccy": s_ccy, "grade": grade, "name": s.name, "sector": _sec,
+                    "rp": rp, "stop": stp, "qty": qty,
+                    "cost": qty * rp, "risk": qty * (rp - stp),
+                })
+            if plan_rows:
+                budget_cash = {"KRW": float(cash), "USD": float(cash_usd)}
+                budget_risk = {"KRW": risk_amt * bet_mult * MAX_NEW_UNITS_PER_DAY,
+                               "USD": risk_amt_usd * bet_mult * MAX_NEW_UNITS_PER_DAY}
+                for row in plan_rows:
+                    cc = row["ccy"]
+                    if row["qty"] <= 0:
+                        row["status"] = "⛔ 한도초과"
+                    elif row["cost"] <= budget_cash[cc] and row["risk"] <= budget_risk[cc] + 1e-9:
+                        row["status"] = "✅ 예약 추천"
+                        budget_cash[cc] -= row["cost"]
+                        budget_risk[cc] -= row["risk"]
+                    else:
+                        row["status"] = "⏸ 예비"
+                n_rec = sum(1 for r in plan_rows if r["status"].startswith("✅"))
+                _mnote = f" × 축소 {bet_mult*100:.0f}%" if bet_mult < 1.0 else ""
+                st.markdown(f"""
+<div class="signal-buy">
+<b>📋 오늘의 예약 매수 플랜 — 후보 {len(plan_rows)}종목 중 ✅ {n_rec}종목 선별</b><br>
+<small>우선순위(조정장돌파 → A급 → 내일후보 → 돌파대기) 순으로 통화별 현금과
+하루 신규 리스크 한도({MAX_NEW_UNITS_PER_DAY}유닛{_mnote}) 안에서 자동 선별.
+⏸ 예비는 앞 종목이 미체결로 예약 취소되면 순번 승계.</small>
+</div>""", unsafe_allow_html=True)
+                plan_df = pd.DataFrame([{
+                    "상태": r["status"],
+                    "우선순위": r["grade"],
+                    "종목": r["name"],
+                    "통화": r["ccy"],
+                    "예약가": fmt_money(r["rp"], r["ccy"]),
+                    "손절가": fmt_money(r["stop"], r["ccy"]),
+                    "수량": f"{r['qty']}주" if r["qty"] > 0 else "0주 (1주 리스크>한도)",
+                    "필요금액": fmt_money(r["cost"], r["ccy"]) if r["qty"] > 0 else "—",
+                    "리스크": fmt_money(r["risk"], r["ccy"]) if r["qty"] > 0 else "—",
+                } for r in plan_rows])
+                st.dataframe(plan_df, hide_index=True, use_container_width=True)
 
             # ── ★ 조정장 돌파 (burge out) — 최상급 셋업 ──
             # 시장(지수)이 조정·하락 국면인데 종목이 신고가를 돌파 →
@@ -1062,7 +1212,7 @@ def main():
 <div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · <b>상대RS {s.rs_rel:+.0f}</b>{acc}<br>
 현재가: {fmt_money(s.price, s_ccy)} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · ATR {s.atr_pct:.1f}%<br>
-{breakout_plan_html(s)}<small>시장 지수 조정 국면 · [{s.filter_status}]</small>
+{breakout_plan_html(s)}{_reserve_qty_line(s)}<small>시장 지수 조정 국면 · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             # ── A급: 매수 적기 ──────────────────
@@ -1110,7 +1260,7 @@ strict 필터 동시 만족 종목 없음.<br>
 <div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {reason}<br>
 현재가: {fmt_money(s.price, s_ccy)} · 당일 {s.day_change_pct:+.1f}% · 피벗+{s.extended_pct:+.1f}% · 50일선+{s.ext_from_ma50:.0f}%<br>
-{breakout_plan_html(s)}<small>종가강도 {s.close_strength:.2f} · ATR {s.atr_pct:.1f}% · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
+{breakout_plan_html(s)}{_reserve_qty_line(s)}<small>종가강도 {s.close_strength:.2f} · ATR {s.atr_pct:.1f}% · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             # ── 예약 매수 후보 (돌파 대기) ──────────
@@ -1126,7 +1276,7 @@ strict 필터 동시 만족 종목 없음.<br>
 <div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — 피벗 {s.pivot_gap_pct:+.1f}% 아래<br>
 현재가: {fmt_money(s.price, s_ccy)} · 거래량 {s.volume_ratio:.1f}x · ATR {s.atr_pct:.1f}%<br>
-{breakout_plan_html(s)}<small>RS {s.rs:+.0f} · [{s.filter_status}]</small>
+{breakout_plan_html(s)}{_reserve_qty_line(s)}<small>RS {s.rs:+.0f} · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
             # ── 공시 리스크 종목 (사용 시 노출) ───
@@ -1532,10 +1682,12 @@ Stop 상향: {ts:,} → <b>{new_stop:,}원</b> (+{new_stop - ts:,}원)
             sector_results_local = st.session_state.get("sector_results", [])
             new_candidates = []  # list[dict]
             seen = set(held_names)
+            _held_keys_bt = held_asset_keys(pf["positions"])
 
             for sr in sector_results_local:
                 for s in sr.leaders:
-                    if s.name in seen or s.tier not in ("A", "B"):
+                    if (s.name in seen or s.tier not in ("A", "B")
+                            or is_held_stock(s, _held_keys_bt)):
                         continue
                     new_candidates.append({
                         "name": s.name,
@@ -2482,8 +2634,8 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                     "⚠️ 키움 REST API 는 등록된 IP 만 호출 가능합니다 "
                     "(에러 8050: 지정단말기 인증). **재조회는 로컬 PC 에서만 동작**하며, "
                     "조회 결과는 GitHub 에 캐시되어 Cloud·다른 PC 에서도 그대로 볼 수 있습니다. "
-                    "🇺🇸 미국 주식 계좌는 키움 REST API 가 국내주식 전용이라 미지원 — "
-                    "`cash_usd` 와 USD 포지션은 수기 입력 유지."
+                    "💡 매일 16:30 로컬 PC 의 `sync_trades.py` 가 매매일지·포지션·현금"
+                    "(국내+미국)을 자동 동기화하므로 이 버튼은 수동 보조용입니다."
                 )
 
                 bal_cache = load_kiwoom_balance_cache()
@@ -2575,12 +2727,17 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                                 f"키움 응답 오류: {bal_res.get('return_msg', bal_res)}"
                             )
                     else:
+                        # 예수금은 kt00001 D+2 추정예수금 (예탁자산은 주식 포함이라 부적합)
                         try:
-                            cash_krw = int(
-                                bal_res.get("prsm_dpst_aset_amt", "0") or 0
-                            )
-                        except (TypeError, ValueError):
-                            cash_krw = 0
+                            dep_res = kiwoom_api.fetch_deposit_kt00001()
+                            cash_krw = int(dep_res.get("d2_entra", "0") or 0)
+                        except Exception:
+                            try:
+                                cash_krw = int(
+                                    bal_res.get("prsm_dpst_aset_amt", "0") or 0
+                                ) - int(bal_res.get("tot_evlt_amt", "0") or 0)
+                            except (TypeError, ValueError):
+                                cash_krw = 0
                         cache_new = {
                             "fetched_at": datetime.now().isoformat(timespec="seconds"),
                             "is_mock": kiwoom_api._is_mock(),

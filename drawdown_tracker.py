@@ -19,8 +19,13 @@ from datetime import date, datetime
 
 # ── 한계선(임계값) — 넘으면 사이즈 축소/매매 중단 경고 ──
 # 추세추종 생존의 핵심은 예측이 아니라 "출혈을 정해진 한계 안에 가두는 것".
+CONSEC_LOSS_SOFT = 2        # 연속 손절 ≥2 → 베팅 한도 75%로 축소
 CONSEC_LOSS_CAUTION = 4     # 연속 손절 ≥4 → 사이즈 절반 권고
 CONSEC_LOSS_STOP = 7        # 연속 손절 ≥7 → 신규 매매 중단 권고
+
+# 규칙 외 개인 투자 종목 — 시스템 성과 집계(연속손절·낙폭)에서 제외.
+# asset 명 또는 kiwoom_stk_cd 로 매칭.
+PERSONAL_ASSETS = {"SPCX"}
 DD_PCT_CAUTION = 10.0       # 실현 낙폭 ≥자본 10% → 주의
 DD_PCT_STOP = 20.0          # 실현 낙폭 ≥자본 20% → 중단
 STALE_DAYS_CAUTION = 60     # 신고점 못 넘긴 지 ≥60일 → 횡보장 의심, 빈도 축소
@@ -33,16 +38,24 @@ def _to_date(s):
     return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
 
 
-def realized_equity_metrics(journal, total_capital, usdkrw=1380.0, today=None):
+def realized_equity_metrics(journal, total_capital, usdkrw=1380.0, today=None,
+                            exclude_assets=None):
     """journal → 실현손익 곡선 기반 출혈 지표.
 
     journal: [{date, action(BUY/ADD/SELL/SELL ALL), asset, shares, price, currency}]
     total_capital: 낙폭 %의 분모 (현재 총자본, 원화)
     usdkrw: USD 청산손익 환산용 (USD 실현거래가 거의 없어 영향 미미)
     today: 경과일 기준일 (기본 오늘)
+    exclude_assets: 집계 제외 종목 (기본: PERSONAL_ASSETS — 규칙 외 개인 투자)
     """
     today = _to_date(today) if today else date.today()
-    rows = sorted(journal, key=lambda e: str(e.get("date", "")))
+    if exclude_assets is None:
+        exclude_assets = PERSONAL_ASSETS
+    rows = sorted(
+        (e for e in journal
+         if e.get("asset") not in exclude_assets
+         and e.get("kiwoom_stk_cd") not in exclude_assets),
+        key=lambda e: str(e.get("date", "")))
 
     lots = defaultdict(deque)   # asset -> deque([shares, price])
     closed = []                 # {date, asset, pnl_krw}
@@ -153,3 +166,24 @@ def assess(metrics):
     if not reasons:
         reasons.append("출혈 한계선 이내 — 규칙대로 매매 지속")
     return {"level": level, "status": status, "reasons": reasons}
+
+
+def size_multiplier(metrics):
+    """출혈 지표 → 신규 진입 베팅 한도 배수(0.0~1.0)와 사유.
+
+    손실이 이어질수록 베팅액을 계단식으로 줄인다 — 하락장 백테스트 결론
+    ('진짜 레버리지는 하락장 진입 축소')의 실행 규칙.
+      연속 손절 ≥7 또는 낙폭 ≥20% → 0.0  (신규 매매 중단)
+      연속 손절 ≥4 또는 낙폭 ≥10% → 0.5  (한도 절반)
+      연속 손절 ≥2               → 0.75 (한도 75%)
+      그 외                       → 1.0
+    """
+    cl = metrics["consecutive_losses"]
+    dd = metrics["drawdown_pct"]
+    if cl >= CONSEC_LOSS_STOP or dd >= DD_PCT_STOP:
+        return 0.0, f"연속 손절 {cl}회 · 실현 낙폭 -{dd:.1f}% — 신규 매매 중단 구간"
+    if cl >= CONSEC_LOSS_CAUTION or dd >= DD_PCT_CAUTION:
+        return 0.5, f"연속 손절 {cl}회 · 실현 낙폭 -{dd:.1f}% — 베팅 한도 50% 축소"
+    if cl >= CONSEC_LOSS_SOFT:
+        return 0.75, f"연속 손절 {cl}회 — 베팅 한도 75%로 축소"
+    return 1.0, ""
