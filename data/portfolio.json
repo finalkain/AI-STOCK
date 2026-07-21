@@ -1,7 +1,7 @@
 {
   "total_capital": 3081377,
   "cash": 3081377,
-  "cash_usd": 3245.45,
+  "cash_usd": 3245.46,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,7 +10,7 @@
       "currency": "USD",
       "shares": 2,
       "avg_price": 317.17,
-      "current_value": 666.2,
+      "current_value": 651.9,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-07-15",
       "trailing_stop": 0,
@@ -21,9 +21,9 @@
       "currency": "USD",
       "shares": 3,
       "avg_price": 130.49,
-      "current_value": 383.46,
+      "current_value": 371.34,
       "kiwoom_stk_cd": "MRK",
-      "entry_date": "",
+      "entry_date": "2026-07-21",
       "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
@@ -32,7 +32,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 754.8,
+      "current_value": 730.74,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 0,
@@ -551,7 +551,20 @@
       "kiwoom_ord_no": "0173419",
       "kiwoom_stk_cd": "A055550",
       "pnl": -17600
+    },
+    {
+      "date": "2026-07-21",
+      "action": "BUY",
+      "asset": "MRK",
+      "currency": "USD",
+      "shares": 3,
+      "price": 130.49,
+      "reason": "키움 자동 동기화 (머크)",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "MRK",
+      "kiwoom_fee_usd": 0.97
     }
   ],
-  "total_capital_usd": 5049.91
+  "total_capital_usd": 4999.44,
+  "last_updated": "2026-07-21T14:31:31.782439"
 }
