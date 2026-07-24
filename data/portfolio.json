@@ -10,7 +10,7 @@
       "currency": "USD",
       "shares": 2,
       "avg_price": 317.17,
-      "current_value": 648.46,
+      "current_value": 642.82,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-07-15",
       "trailing_stop": 0,
@@ -21,7 +21,7 @@
       "currency": "USD",
       "shares": 3,
       "avg_price": 130.49,
-      "current_value": 381.09,
+      "current_value": 393.15,
       "kiwoom_stk_cd": "MRK",
       "entry_date": "2026-07-21",
       "trailing_stop": 0,
@@ -32,7 +32,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 697.38,
+      "current_value": 698.28,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 0,
@@ -565,6 +565,6 @@
       "kiwoom_fee_usd": 0.97
     }
   ],
-  "total_capital_usd": 4972.39,
+  "total_capital_usd": 4979.71,
   "last_updated": "2026-07-21T14:31:31.782439"
 }
