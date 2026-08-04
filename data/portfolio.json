@@ -1,27 +1,16 @@
 {
   "total_capital": 1140777,
   "cash": 1140777,
-  "cash_usd": 3245.46,
+  "cash_usd": 3845.09,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
-    {
-      "asset": "AAPL",
-      "currency": "USD",
-      "shares": 2,
-      "avg_price": 317.17,
-      "current_value": 675.8,
-      "kiwoom_stk_cd": "AAPL",
-      "entry_date": "2026-07-15",
-      "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
     {
       "asset": "MRK",
       "currency": "USD",
       "shares": 3,
       "avg_price": 130.49,
-      "current_value": 389.76,
+      "current_value": 384.0,
       "kiwoom_stk_cd": "MRK",
       "entry_date": "2026-07-21",
       "trailing_stop": 0,
@@ -32,7 +21,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 676.44,
+      "current_value": 751.98,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 0,
@@ -563,8 +552,21 @@
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "MRK",
       "kiwoom_fee_usd": 0.97
+    },
+    {
+      "date": "2026-08-04",
+      "action": "SELL",
+      "asset": "AAPL",
+      "currency": "USD",
+      "shares": 2,
+      "price": 300.57,
+      "reason": "키움 자동 동기화 (애플) · 매도 $300.57 - 평단 $317.17 = -33.20$",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "AAPL",
+      "kiwoom_fee_usd": 1.5,
+      "pnl": -33.2
     }
   ],
-  "total_capital_usd": 4987.46,
+  "total_capital_usd": 4981.07,
   "last_updated": "2026-07-21T14:31:31.782439"
 }
