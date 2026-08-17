@@ -1,16 +1,27 @@
 {
   "total_capital": 1140777,
   "cash": 1140777,
-  "cash_usd": 3845.09,
+  "cash_usd": 3617.06,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
+    {
+      "asset": "CRWD",
+      "currency": "USD",
+      "shares": 1,
+      "avg_price": 227.47,
+      "current_value": 213.9,
+      "kiwoom_stk_cd": "CRWD",
+      "entry_date": "2026-08-18",
+      "trailing_stop": 0,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
     {
       "asset": "MRK",
       "currency": "USD",
       "shares": 3,
       "avg_price": 130.49,
-      "current_value": 406.14,
+      "current_value": 407.91,
       "kiwoom_stk_cd": "MRK",
       "entry_date": "2026-07-21",
       "trailing_stop": 0,
@@ -21,7 +32,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 852.54,
+      "current_value": 877.38,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 0,
@@ -565,8 +576,20 @@
       "kiwoom_stk_cd": "AAPL",
       "kiwoom_fee_usd": 1.5,
       "pnl": -33.2
+    },
+    {
+      "date": "2026-08-18",
+      "action": "BUY",
+      "asset": "CRWD",
+      "currency": "USD",
+      "shares": 1,
+      "price": 227.47,
+      "reason": "키움 자동 동기화 (크라우드스트라이크홀딩스)",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "CRWD",
+      "kiwoom_fee_usd": 0.56
     }
   ],
-  "total_capital_usd": 5103.77,
+  "total_capital_usd": 5116.25,
   "last_updated": "2026-07-21T14:31:31.782439"
 }
