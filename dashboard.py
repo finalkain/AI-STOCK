@@ -6,6 +6,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import json
+import math
 import time
 import numpy as np
 import pandas as pd
@@ -1364,8 +1365,9 @@ strict 필터 동시 만족 종목 없음.<br>
                         continue
                     st.markdown(f"**{_mkt_label}**")
                     for i, (name, rs) in enumerate(rows, 1):
-                        bar = "█" * max(int(rs / 10), 0)
-                        st.markdown(f"`{i:>2d}. {name:<12s} RS {rs:>+6.0f}` {bar}")
+                        rs_val = rs if (rs is not None and math.isfinite(rs)) else 0.0
+                        bar = "█" * max(int(rs_val / 10), 0)
+                        st.markdown(f"`{i:>2d}. {name:<12s} RS {rs_val:>+6.0f}` {bar}")
         else:
             st.markdown("""
 <div class="signal-none">
