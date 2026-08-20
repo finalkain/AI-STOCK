@@ -10,10 +10,10 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 227.47,
-      "current_value": 212.38,
+      "current_value": 201.63,
       "kiwoom_stk_cd": "CRWD",
       "entry_date": "2026-08-18",
-      "trailing_stop": 0,
+      "trailing_stop": 210.32,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -21,10 +21,10 @@
       "currency": "USD",
       "shares": 3,
       "avg_price": 130.49,
-      "current_value": 405.9,
+      "current_value": 456.6,
       "kiwoom_stk_cd": "MRK",
       "entry_date": "2026-07-21",
-      "trailing_stop": 0,
+      "trailing_stop": 145.67,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -32,10 +32,10 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 855.3,
+      "current_value": 837.9,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
-      "trailing_stop": 0,
+      "trailing_stop": 130.69,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     }
   ],
@@ -590,6 +590,8 @@
       "kiwoom_fee_usd": 0.56
     }
   ],
-  "total_capital_usd": 5090.64,
-  "last_updated": "2026-07-21T14:31:31.782439"
+  "total_capital_usd": 5113.19,
+  "last_updated": "2026-07-21T14:31:31.782439",
+  "base_capital": 3085500,
+  "base_capital_usd": 5113.19
 }

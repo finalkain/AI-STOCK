@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from backtest.data_loader import load_asset, load_yfinance, ASSET_REGISTRY
 from backtest.turtle_system import calc_atr
+from position_rules import build_plan, MAX_PYRAMID, PYRAMID_STEP_ATR, ADDUP_WINDOW_ATR
 import kiwoom_api
 
 # ── 인증 ──────────────────────────────────────────
@@ -498,6 +499,161 @@ def lookup_stock_score(ticker, name):
         return None
 
 
+# ── 보유 종목 시세·판정 (ALL_ASSETS 밖 종목도 조회) ──────
+def position_ticker(pos):
+    """포지션 → yfinance 티커. 저장된 ticker → 키움 종목코드 → 이름 검색 순.
+
+    키움 자동 동기화 종목(CRWD·MRK 등)은 ALL_ASSETS 에 없으므로
+    이 경로로 시세를 직접 조회해야 손절가·손익이 표시된다."""
+    tk = str(pos.get("ticker") or "").strip()
+    if tk:
+        return tk
+    code = str(pos.get("kiwoom_stk_cd") or "").strip()
+    if code:
+        if code.isdigit() and len(code) == 6:
+            kr, _us = load_universe()
+            for _nm, t in kr.items():
+                if t[:6] == code:
+                    return t
+            return code + ".KS"
+        if code.isalpha():
+            return code.upper()
+    matches = resolve_stock(pos.get("asset", ""))
+    return matches[0][1] if matches else None
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_position_history(ticker):
+    """티커 → 2년 일봉. 실패 시 None."""
+    from stock_scanner import _get_prices
+    try:
+        d = _get_prices(ticker, "2y")
+    except Exception:
+        return None
+    if d is None or getattr(d, "empty", True):
+        return None
+    return d
+
+
+def build_position_plan(pos, total_capital, risk_pct):
+    """포지션 dict → PositionPlan (손절·익절·추가매수 판정). 조회 실패 시 None."""
+    ticker = position_ticker(pos)
+    if not ticker:
+        return None
+    df = load_position_history(ticker)
+    if df is None:
+        return None
+    ccy = pos.get("currency") or detect_currency(pos.get("asset", ""), ticker)
+    try:
+        return build_plan(
+            df, name=pos.get("asset", ticker), currency=ccy,
+            shares=pos.get("shares", 0) or 0, avg_price=pos.get("avg_price", 0) or 0,
+            entry_date=pos.get("entry_date", "") or "",
+            saved_stop=pos.get("trailing_stop", 0) or 0,
+            pyramid_count=pos.get("pyramid_count", 0) or 0,
+            total_capital=total_capital or 0, risk_pct=risk_pct,
+        )
+    except Exception:
+        return None
+
+
+_ACTION_STYLE = {
+    "EXIT":  ("🔴", "signal-buy"),
+    "ADD":   ("🔵", "signal-buy"),
+    "WATCH": ("🟡", "signal-none"),
+    "HOLD":  ("🟢", "signal-hold"),
+}
+
+
+def position_card_html(plan):
+    """PositionPlan → 손절가·익절가·추가매수가가 모두 보이는 카드 HTML."""
+    ccy = plan.currency
+    emoji, css = _ACTION_STYLE.get(plan.action, ("🟢", "signal-hold"))
+    m = lambda v: fmt_money(v, ccy)
+
+    # ── 손익 ──
+    if plan.shares > 0 and plan.avg_price > 0:
+        pnl = (f"매입 {m(plan.avg_price)} × {plan.shares:g}주 · "
+               f"<b>{plan.pnl_pct:+.1f}%</b> ({m(plan.pnl_amount)}) · "
+               f"<b>{plan.r_multiple:+.1f}R</b><br>")
+    else:
+        pnl = ""
+
+    # ── 손절가 (= 청산가) ──
+    stop_label = "익절·청산가" if plan.locked_r > 0 else "손절가"
+    stop_block = (
+        f"<b>{stop_label}: {m(plan.stop)}</b> "
+        f"<small>(현재가 대비 {-plan.stop_gap_pct:+.1f}% · {plan.stop_source})</small><br>"
+    )
+    if plan.shares > 0 and plan.avg_price > 0:
+        if plan.locked_r > 0:
+            stop_block += (
+                f"<small>도달 시 확보: {plan.locked_pct:+.1f}% "
+                f"(net {plan.locked_net_pct:+.1f}%) · {plan.locked_r:.1f}R · "
+                f"{m(plan.locked_amount)}</small><br>"
+            )
+        else:
+            stop_block += (
+                f"<small>도달 시 손실: {plan.locked_pct:+.1f}% "
+                f"(net {plan.locked_net_pct:+.1f}%) · {m(plan.locked_amount)} "
+                f"· 최초 손절 {m(plan.init_stop)}</small><br>"
+            )
+
+    # ── 익절: 고정 목표가 없음 + R배수 참고선 ──
+    if plan.r_levels:
+        marks = " · ".join(
+            f"{'<b>' if r.hit else ''}{r.seq}R {m(r.price)}{'✔</b>' if r.hit else ''}"
+            for r in plan.r_levels[:4]
+        )
+        profit_block = (
+            f"<small>고정 익절가 없음 — 청산은 트레일링 스탑 단독 "
+            f"(수익은 열어두고 방어선만 올린다)</small><br>"
+            f"<small>참고 R선: {marks}</small><br>"
+        )
+    else:
+        profit_block = ""
+
+    # ── 추가매수 (청산 신호가 있으면 표시하지 않는다) ──
+    if plan.action == "EXIT":
+        addup_block = "<small>추가매수: 청산 신호 우선 — 판단 보류</small><br>"
+    elif plan.addups:
+        ladder = " · ".join(
+            f"{a.seq}차 {m(a.price)} {a.status}" for a in plan.addups
+        )
+        if plan.addup_ready and plan.next_addup:
+            hi = plan.next_addup.price + ADDUP_WINDOW_ATR * plan.atr_entry
+            add_head = (f"<b>추가매수 가능: {m(plan.next_addup.price)} ~ {m(hi)}</b> "
+                        f"<small>({plan.addup_shares:,}주 · {m(plan.addup_cost)})</small>")
+        elif plan.addup_blocked:
+            add_head = f"<b>추가매수 불가</b> <small>— {plan.addup_blocked}</small>"
+        elif plan.next_addup:
+            add_head = (f"<b>다음 추가매수: {m(plan.next_addup.price)}</b> "
+                        f"<small>({plan.next_addup.gap_pct:+.1f}% · "
+                        f"{plan.addup_shares:,}주 · {m(plan.addup_cost)})</small>")
+        else:
+            add_head = "<b>추가매수 없음</b>"
+        addup_block = f"{add_head}<br><small>사다리(0.5N): {ladder}</small><br>"
+    else:
+        addup_block = ""
+
+    # 추가매수 차단 사유는 위 블록에 이미 노출 — 노트에서는 생략
+    notes = "".join(f"<small>• {n}</small><br>" for n in plan.notes
+                    if not n.startswith("추가매수 불가"))
+    regime_str = ("OK" if plan.regime else "X") if plan.regime_known else "판정불가"
+
+    return f"""
+<div class="{css}">
+<b>{emoji} {plan.name}</b> <small>[{ccy}] · {plan.action}</small><br>
+현재가 {m(plan.price)} <small>({plan.day_change_pct:+.1f}%)</small><br>
+{pnl}<hr style="margin:4px 0;border-color:#444">
+{stop_block}{profit_block}<hr style="margin:4px 0;border-color:#444">
+{addup_block}<hr style="margin:4px 0;border-color:#444">
+<small>체제 {regime_str} · {plan.ext_ma_label} {plan.ext_from_ma50:+.0f}% · N {plan.atr_now:,.2f}
+(진입 N {plan.atr_entry:,.2f}) · 보유 {plan.days_held}일</small><br>
+{notes}</div>
+"""
+
+
 def make_chart(data, name, analysis, trailing_stop=None):
     df = data.tail(120).copy()
     c = df["Close"].values.astype(float)
@@ -616,15 +772,39 @@ def main():
         results.append(r)
     results.sort(key=lambda x: x["rs"], reverse=True)
 
+    # ── 보유 종목 판정 (손절·익절·추가매수) ─────────────
+    # ALL_ASSETS 밖 종목(키움 자동 동기화분)도 티커로 직접 조회한다.
+    pos_plans = {}
+    with st.spinner("보유 종목 분석 중..."):
+        for pos in pf["positions"]:
+            ccy = pos.get("currency") or detect_currency(pos.get("asset", ""))
+            pos["currency"] = ccy  # 누락 보강
+            cap = (pf.get("total_capital_usd", 0.0) if ccy == "USD"
+                   else pf.get("total_capital", 0))
+            plan = build_position_plan(pos, cap, pf.get("risk_pct", 0.01))
+            if plan:
+                pos_plans[pos["asset"]] = plan
+                # 트레일링 스탑은 상향만 — 계산값이 높으면 갱신해 저장
+                if pos.get("shares", 0) > 0 and plan.stop > (pos.get("trailing_stop") or 0):
+                    pos["trailing_stop"] = (round(plan.stop, 2) if ccy == "USD"
+                                            else int(plan.stop))
+
+    def pos_price(pos):
+        """포지션 현재가 — plan 우선, 없으면 ALL_ASSETS 분석 결과."""
+        plan = pos_plans.get(pos["asset"])
+        if plan:
+            return plan.price
+        asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
+        return asset_r["price"] if asset_r else None
+
     # 통화별 평가가치 계산 (KRW / USD 분리)
     pos_value_krw = 0
     pos_value_usd = 0.0
     for pos in pf["positions"]:
-        ccy = pos.get("currency") or detect_currency(pos.get("asset", ""))
-        pos["currency"] = ccy  # 누락 보강
-        asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
-        if asset_r and pos["shares"] > 0:
-            cur_val = asset_r["price"] * pos["shares"]
+        ccy = pos["currency"]
+        price_now = pos_price(pos)
+        if price_now and pos["shares"] > 0:
+            cur_val = price_now * pos["shares"]
             pos["current_value"] = round(cur_val, 2) if ccy == "USD" else int(cur_val)
         cur_val = pos.get("current_value", 0)
         if pos["shares"] <= 0 and not cur_val:
@@ -669,9 +849,9 @@ def main():
     total_pnl_usd = 0.0
     for pos in pf["positions"]:
         if pos["shares"] > 0 and pos["avg_price"] > 0:
-            asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
-            if asset_r:
-                pnl = (asset_r["price"] - pos["avg_price"]) * pos["shares"]
+            price_now = pos_price(pos)
+            if price_now:
+                pnl = (price_now - pos["avg_price"]) * pos["shares"]
                 if pos.get("currency") == "USD":
                     total_pnl_usd += pnl
                 else:
@@ -682,9 +862,9 @@ def main():
     stop_loss_usd = 0.0
     for pos in pf["positions"]:
         if pos["shares"] > 0 and pos.get("trailing_stop", 0) > 0:
-            asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
-            if asset_r:
-                loss_per_pos = max((asset_r["price"] - pos["trailing_stop"]) * pos["shares"], 0)
+            price_now = pos_price(pos)
+            if price_now:
+                loss_per_pos = max((price_now - pos["trailing_stop"]) * pos["shares"], 0)
                 if pos.get("currency") == "USD":
                     stop_loss_usd += loss_per_pos
                 else:
@@ -1382,65 +1562,47 @@ strict 필터 동시 만족 종목 없음.<br>
         st.markdown("##### M5 보유 종목")
         if not pf["positions"]:
             st.info("보유 종목 없음")
+        st.caption("손절가 = 청산가. 고정 익절가는 두지 않고 방어선만 올린다 (터틀 2N 트레일링).")
         for pos in pf["positions"]:
             pos_ccy = pos.get("currency", "KRW")
+            plan = pos_plans.get(pos["asset"])
             asset_r = next((r for r in results if r["name"] == pos["asset"]), None)
-            if not asset_r:
-                st.warning(f'{pos["asset"]}: 데이터 없음')
+
+            if plan is None and asset_r is None:
+                st.warning(
+                    f'{pos["asset"]}: 시세 조회 실패 — portfolio.json 의 '
+                    f'ticker / kiwoom_stk_cd 를 확인하세요'
+                )
                 continue
 
-            price = asset_r["price"]
-            ts = pos.get("trailing_stop", 0)
-            new_ts_raw = price - 2 * asset_r["atr20"]
-            new_ts = round(new_ts_raw, 2) if pos_ccy == "USD" else int(new_ts_raw)
-
-            if new_ts > ts:
-                pos["trailing_stop"] = new_ts
-                ts = new_ts
-
-            ts_gap = (price - ts) / price * 100 if price > 0 else 0
-
-            status = "보유"
-            if price <= ts:
-                status = "STOP 이탈!"
-            elif asset_r["s2"]:
-                status = "55일 돌파중"
-            elif asset_r["s1"]:
-                status = "20일 돌파중"
-            elif asset_r["regime"]:
-                status = "추세 유효"
-
-            # 손익 계산
-            pnl_str = ""
-            if pos["shares"] > 0 and pos["avg_price"] > 0:
-                pnl_pct = (price - pos["avg_price"]) / pos["avg_price"] * 100
-                pnl_amt = (price - pos["avg_price"]) * pos["shares"]
-                eval_amt = price * pos["shares"]
-                pnl_str = (f"매입가: {fmt_money(pos['avg_price'], pos_ccy)} × {pos['shares']}주<br>"
-                           f"평가금: {fmt_money(eval_amt, pos_ccy)} "
-                           f"({pnl_pct:+.1f}%, {fmt_money(pnl_amt, pos_ccy)})<br>")
-
-            # Time Stop 체크
-            time_stop_warn = ""
-            entry_date_str = pos.get("entry_date", "")
-            if entry_date_str and pos["shares"] > 0 and pos["avg_price"] > 0:
-                entry_dt = datetime.strptime(entry_date_str, "%Y-%m-%d").date()
-                days_held = (datetime.now().date() - entry_dt).days
-                if days_held >= 14:
-                    move_pct = abs((price - pos["avg_price"]) / pos["avg_price"] * 100)
-                    if move_pct <= 2.0:
-                        time_stop_warn = (
-                            f"<br><b>TIME STOP</b> — {days_held}일 경과, "
-                            f"수익률 ±{move_pct:.1f}% (정리 검토)"
-                        )
-
-            st.markdown(f"""
+            if plan is not None:
+                price = plan.price
+                ts = pos.get("trailing_stop", 0) or plan.stop
+                pos_atr = plan.atr_now
+                st.markdown(position_card_html(plan), unsafe_allow_html=True)
+            else:
+                # 지수·원자재 등 티커 조회가 안 되는 자산 — 기존 축약 표시
+                price = asset_r["price"]
+                ts = pos.get("trailing_stop", 0)
+                pos_atr = asset_r["atr20"]
+                new_ts_raw = price - 2 * asset_r["atr20"]
+                new_ts = round(new_ts_raw, 2) if pos_ccy == "USD" else int(new_ts_raw)
+                if new_ts > ts:
+                    pos["trailing_stop"] = new_ts
+                    ts = new_ts
+                ts_gap = (price - ts) / price * 100 if price > 0 else 0
+                pnl_str = ""
+                if pos["shares"] > 0 and pos["avg_price"] > 0:
+                    pnl_pct = (price - pos["avg_price"]) / pos["avg_price"] * 100
+                    pnl_amt = (price - pos["avg_price"]) * pos["shares"]
+                    pnl_str = (f"매입 {fmt_money(pos['avg_price'], pos_ccy)} × {pos['shares']}주 · "
+                               f"{pnl_pct:+.1f}% ({fmt_money(pnl_amt, pos_ccy)})<br>")
+                st.markdown(f"""
 <div class="signal-hold">
 <b>{pos['asset']}</b> <small>[{pos_ccy}]</small><br>
-현재가: {fmt_money(price, pos_ccy)}<br>
-{pnl_str}Stop: {fmt_money(ts, pos_ccy)} ({ts_gap:.1f}%)<br>
-상태: {status}<br>
-{asset_r['alignment']} | 체제 {'OK' if asset_r['regime'] else 'X'}{time_stop_warn}
+현재가 {fmt_money(price, pos_ccy)}<br>
+{pnl_str}손절가 {fmt_money(ts, pos_ccy)} (현재가 대비 -{ts_gap:.1f}%)<br>
+{asset_r['alignment']} | 체제 {'OK' if asset_r['regime'] else 'X'}
 </div>
 """, unsafe_allow_html=True)
 
@@ -1466,6 +1628,25 @@ strict 필터 동시 만족 종목 없음.<br>
                         key=f"add_price_{pos_key}"
                     )
 
+                    # 터틀 0.5N 사다리 — 목표가 구간 밖 매수는 추격
+                    if plan is not None and plan.addups:
+                        if plan.addup_blocked:
+                            st.warning(f"규칙상 추가매수 불가 — {plan.addup_blocked}")
+                        elif plan.next_addup:
+                            _lo = plan.next_addup.price
+                            _hi = _lo + ADDUP_WINDOW_ATR * plan.atr_entry
+                            st.caption(
+                                f"{plan.next_addup.seq}회차 목표 구간 "
+                                f"{fmt_money(_lo, pos_ccy)} ~ {fmt_money(_hi, pos_ccy)} "
+                                f"(진입가 + {PYRAMID_STEP_ATR * plan.next_addup.seq:.1f}N, "
+                                f"최대 {MAX_PYRAMID}회)"
+                            )
+                            if add_price > _hi:
+                                st.warning(
+                                    f"매수 예정가가 목표 구간을 "
+                                    f"{(add_price - _hi) / plan.atr_entry:.1f}N 초과 — 추격 매수"
+                                )
+
                     old_shares = pos["shares"]
                     old_avg = pos["avg_price"]
                     new_total = old_shares + add_shares
@@ -1480,7 +1661,7 @@ strict 필터 동시 만족 종목 없음.<br>
                     new_stop_pct = (new_avg - new_stop) / new_avg * 100 if new_avg > 0 else 0
 
                     # ATR 기반 Stop (비교용)
-                    atr_stop_raw = price - 2 * asset_r["atr20"]
+                    atr_stop_raw = price - 2 * pos_atr
                     atr_stop = round(atr_stop_raw, 2) if pos_ccy == "USD" else int(atr_stop_raw)
 
                     st.markdown(f"""
@@ -2330,7 +2511,13 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                     sell_cash_bucket = get_cash(pf, sell_ccy)
                     unit = money_unit(sell_ccy)
                     sell_r = next((r for r in results if r["name"] == sell_asset), None)
-                    ref_price = sell_r["price"] if sell_r else sell_pos["avg_price"]
+                    _sell_plan = pos_plans.get(sell_asset)
+                    if _sell_plan:
+                        ref_price = _sell_plan.price
+                    elif sell_r:
+                        ref_price = sell_r["price"]
+                    else:
+                        ref_price = sell_pos["avg_price"]
                     held_qty = sell_pos["shares"]
                     avg_buy = sell_pos["avg_price"]
 
