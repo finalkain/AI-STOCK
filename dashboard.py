@@ -301,6 +301,122 @@ def save_kiwoom_balance_cache(cache: dict, commit_msg: str | None = None) -> boo
     return True
 
 
+def kiwoom_holdings_rows(cache: dict | None) -> list[dict]:
+    """키움 잔고 캐시 → 국내·미국 보유 종목 표 행 목록 (실측 스냅샷)."""
+    rows: list[dict] = []
+    if not cache:
+        return rows
+    for h in cache.get("holdings") or []:
+        qty = int(h.get("rmnd_qty", "0") or 0)
+        if qty <= 0:
+            continue
+        pur = int(h.get("pur_pric", "0") or 0)
+        cur = int(h.get("cur_prc", "0") or 0)
+        rows.append({
+            "시장": "KR",
+            "코드": (h.get("stk_cd") or "").strip(),
+            "종목": (h.get("stk_nm") or "").strip(),
+            "수량": qty,
+            "평균단가": fmt_money(pur, "KRW"),
+            "현재가": fmt_money(cur, "KRW"),
+            "평가금액": fmt_money(cur * qty, "KRW"),
+            "손익률": f"{((cur - pur) / pur * 100) if pur else 0:+.2f}%",
+        })
+    for h in cache.get("us_holdings") or []:
+        qty = int(h.get("poss_qty", "0") or 0)
+        if qty <= 0:
+            continue
+        cd = (h.get("stk_cd") or "").strip()
+        nm = (h.get("frgn_stk_nm") or "").strip()
+        rows.append({
+            "시장": "US",
+            "코드": cd,
+            "종목": f"{cd} ({nm})" if nm else cd,
+            "수량": qty,
+            "평균단가": fmt_money(float(h.get("frgn_stk_book_uv", "0") or 0), "USD"),
+            "현재가": fmt_money(float(h.get("now_pric", "0") or 0), "USD"),
+            "평가금액": fmt_money(float(h.get("evlt_amt", "0") or 0), "USD"),
+            "손익률": f"{float(h.get('pl_rt', '0') or 0):+.2f}%",
+        })
+    return rows
+
+
+def position_key_of(pos: dict) -> str:
+    """포지션 → 키움 종목코드(없으면 종목명) 기준 비교 키."""
+    return str(pos.get("kiwoom_stk_cd") or pos.get("asset") or "").strip()
+
+
+def kiwoom_account_sync(pf: dict) -> tuple[str | None, dict]:
+    """키움 계좌 조회 → 매매일지·포지션·현금을 pf 에 in-place 반영.
+
+    sync_trades.py(매일 16:30 자동 실행)와 동일한 로직을 대시보드 버튼에서
+    수동 호출한다. 키움 REST API 는 지정단말기(IP) 인증이 걸려 있어
+    Streamlit Cloud 에서는 8050 으로 차단된다 → 로컬 PC 전용.
+
+    반환: (에러메시지 | None, {"trades", "pnl", "changes", "warnings"})
+    """
+    try:
+        import sync_trades as _sync
+    except Exception as ex:
+        return f"sync_trades 모듈 로드 실패: {ex}", {}
+    try:
+        journal = pf.setdefault("journal", [])
+        start, end = _sync.default_range(journal)
+        kr, kr_err = _sync.fetch_kr_entries(start, end)
+        us, us_err = _sync.fetch_us_entries(start, end)
+        new, _skipped = _sync.dedup_new(journal, kr + us)
+        journal.extend(new)
+        journal.sort(key=lambda x: x.get("date", ""))
+        filled = len(_sync.compute_missing_pnl(journal))
+        changes = _sync.sync_balances(pf, write_cache=True)
+    except Exception as ex:
+        return str(ex), {}
+    return None, {"trades": new, "pnl": filled, "changes": changes,
+                  "warnings": kr_err + us_err, "range": (start, end)}
+
+
+def kiwoom_sync_commit(pf: dict, info: dict) -> tuple[bool, str]:
+    """계좌 조회 결과(portfolio.json + 잔고 캐시)를 영속화.
+
+    - Cloud: Streamlit Secrets 의 github_token 으로 Contents API 커밋
+    - 로컬 PC: 토큰이 없으므로 sync_trades 와 동일하게 git commit + push
+      (이래야 Streamlit Cloud 대시보드에도 반영된다)
+    반환: (성공 여부, 경로 설명)
+    """
+    cache = load_kiwoom_balance_cache() or {}
+    msg = (f"Account refresh (dashboard): "
+           f"{len(info.get('trades') or [])} trades, "
+           f"{len(info.get('changes') or [])} balance changes "
+           f"({cache.get('fetched_at', '')})")
+
+    if not save_portfolio(pf):  # 로컬 저장 (캐시는 sync_balances 가 이미 기록)
+        return False, "로컬 저장 실패"
+
+    try:
+        token = st.secrets.get("github_token", "")
+    except Exception:
+        token = ""
+
+    if token:
+        ok_pf = _save_file_to_github(
+            "data/portfolio.json",
+            json.dumps(pf, ensure_ascii=False, indent=2), msg,
+        )
+        ok_cache = _save_file_to_github(
+            "data/kiwoom_balance_cache.json",
+            json.dumps(cache, ensure_ascii=False, indent=2), msg,
+        )
+        return (ok_pf and ok_cache), "GitHub API 커밋"
+
+    try:
+        import sync_trades as _sync
+        if _sync.git_commit_push(msg):
+            return True, "git commit + push"
+        return False, "git 커밋/푸시 실패 (로컬 파일은 저장됨)"
+    except Exception as ex:
+        return False, f"git 커밋 불가 — 로컬 파일만 저장됨: {ex}"
+
+
 def _is_kiwoom_ip_block(msg_or_obj) -> bool:
     s = str(msg_or_obj)
     return "8050" in s or "지정단말기" in s
@@ -1560,6 +1676,95 @@ strict 필터 동시 만족 종목 없음.<br>
     # ── 오른쪽: 보유 종목 + 계산기 ────────────────
     with right:
         st.markdown("##### M5 보유 종목")
+
+        # ── 계좌 조회: 키움 실측 잔고 → 포지션·현금·매매일지 갱신 ────
+        _acct_done = st.session_state.pop("m5_acct_result", None)
+        if _acct_done:
+            st.success(_acct_done)
+
+        _bal_cache = load_kiwoom_balance_cache() or {}
+        _acct_cols = st.columns([1, 1.3])
+        _acct_btn = _acct_cols[0].button(
+            "🔄 계좌 조회", key="m5_account_refresh", type="primary",
+            use_container_width=True,
+            help="키움 계좌의 실제 보유 종목·현금을 다시 읽어 포지션과 매매일지를 "
+                 "갱신하고 GitHub 에 커밋합니다. 키움 REST API 는 지정단말기(IP) "
+                 "인증이 걸려 있어 로컬 PC 에서만 동작합니다 (Cloud 는 8050 차단).",
+        )
+        _acct_cols[1].caption(
+            f"마지막 계좌 조회<br><code>{_bal_cache.get('fetched_at') or '없음'}</code>",
+            unsafe_allow_html=True,
+        )
+
+        if _acct_btn:
+            with st.spinner("키움 계좌 조회 중 — 국내·미국 잔고 + 체결내역…"):
+                _err, _info = kiwoom_account_sync(pf)
+            if _err:
+                if _is_kiwoom_ip_block(_err):
+                    st.error(
+                        "🚫 키움 IP 정책 차단 (8050: 지정단말기 인증) — "
+                        "**Streamlit Cloud 에서는 계좌 조회가 불가**합니다. "
+                        "로컬 PC(또는 맥미니)에서 `streamlit run dashboard.py` 로 "
+                        "열어 이 버튼을 누르면 GitHub 에 커밋되어 Cloud 에도 "
+                        "반영됩니다. 아래 표는 마지막으로 커밋된 계좌 스냅샷입니다."
+                    )
+                else:
+                    st.error(f"계좌 조회 실패: {_err[:400]}")
+            else:
+                for _w in _info.get("warnings") or []:
+                    st.warning(_w)
+                _ok, _how = kiwoom_sync_commit(pf, _info)
+                _parts = [
+                    f"신규 체결 {len(_info['trades'])}건",
+                    f"손익 계산 {_info['pnl']}건",
+                    f"잔고 변경 {len(_info['changes'])}건",
+                ]
+                if _info["changes"]:
+                    _parts.append(" / ".join(_info["changes"][:6]))
+                _parts.append(_how)
+                st.session_state["m5_acct_result"] = (
+                    ("계좌 조회 완료 — " if _ok else "계좌 조회했으나 영속화 실패 — ")
+                    + " · ".join(_parts)
+                )
+                st.rerun()
+
+        # ── 키움 실측 보유 종목 (캐시 기반 — Cloud 에서도 조회 가능) ──
+        _hold_rows = kiwoom_holdings_rows(_bal_cache)
+        _pos_keys = {position_key_of(p) for p in pf.get("positions", [])}
+        _kw_keys = {r["코드"] for r in _hold_rows}
+        for _r in _hold_rows:
+            _r["상태"] = "반영됨" if _r["코드"] in _pos_keys else "🆕 미반영"
+        _gone = [p for p in pf.get("positions", [])
+                 if position_key_of(p) not in _kw_keys]
+        _mismatch = bool(_kw_keys ^ _pos_keys) and bool(_hold_rows)
+
+        _exp_label = f"📋 키움 계좌 실측 보유 {len(_hold_rows)}종목"
+        if _mismatch:
+            _exp_label += " ⚠️ 대시보드와 불일치"
+        with st.expander(_exp_label, expanded=_mismatch):
+            if _hold_rows:
+                st.dataframe(
+                    pd.DataFrame(_hold_rows),
+                    use_container_width=True, hide_index=True,
+                    height=min(len(_hold_rows) * 38 + 40, 300),
+                )
+            else:
+                st.info("잔고 캐시가 비어 있습니다. '계좌 조회' 를 눌러주세요.")
+            for _p in _gone:
+                st.warning(
+                    f"{_p.get('asset')} — 키움 계좌에 없는데(청산 추정) "
+                    f"대시보드 포지션에 남아 있습니다. '계좌 조회' 로 정리됩니다."
+                )
+            if _mismatch:
+                st.caption(
+                    "🆕 미반영 = 키움에는 있는데 대시보드 포지션에 없음. "
+                    "로컬 PC 에서 '계좌 조회' 를 누르면 자동 반영됩니다."
+                )
+            st.caption(
+                f"기준 시각 `{_bal_cache.get('fetched_at') or '없음'}` · "
+                "매일 16:30 `sync_trades.py` 자동 동기화 + 이 버튼으로 수동 갱신"
+            )
+
         if not pf["positions"]:
             st.info("보유 종목 없음")
         st.caption("손절가 = 청산가. 고정 익절가는 두지 않고 방어선만 올린다 (터틀 2N 트레일링).")
@@ -2886,66 +3091,33 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
                 refetch = st.button(
                     "🔄 키움 재조회 (로컬 PC 전용)",
                     key="kiwoom_balance_fetch", type="secondary",
+                    help="M5 보유 종목 패널의 '계좌 조회' 와 동일 — 국내·미국 잔고와 "
+                         "체결내역을 모두 다시 읽어 포지션·현금·매매일지를 갱신합니다.",
                 )
                 if refetch:
-                    err_text = None
-                    bal_res = None
-                    try:
-                        with st.spinner("키움 API 조회 중..."):
-                            bal_res = kiwoom_api.fetch_balance_kt00018()
-                    except Exception as ex:
-                        err_text = str(ex)
-
-                    if err_text:
-                        if _is_kiwoom_ip_block(err_text):
+                    with st.spinner("키움 계좌 조회 중 — 국내·미국 잔고 + 체결내역…"):
+                        err, info = kiwoom_account_sync(pf)
+                    if err:
+                        if _is_kiwoom_ip_block(err):
                             st.error(
                                 "🚫 키움 IP 정책 차단 (8050: 지정단말기 인증). "
-                                "**Streamlit Cloud 에서는 동작하지 않습니다.** "
-                                "로컬 PC 에서 `streamlit run dashboard.py` 로 "
-                                "실행해 주세요."
+                                "Streamlit Cloud 에서는 동작하지 않습니다 — "
+                                "로컬 PC 에서 실행해 주세요."
                             )
                         else:
-                            st.error(f"키움 잔고 조회 실패: {err_text}")
-                    elif bal_res.get("return_code") not in (0, "0", None):
-                        if _is_kiwoom_ip_block(bal_res):
-                            st.error(
-                                "🚫 키움 IP 정책 차단 (8050). 로컬 PC 에서 실행해주세요."
-                            )
-                        else:
-                            st.error(
-                                f"키움 응답 오류: {bal_res.get('return_msg', bal_res)}"
-                            )
+                            st.error(f"계좌 조회 실패: {err[:400]}")
                     else:
-                        # 예수금은 kt00001 D+2 추정예수금 (예탁자산은 주식 포함이라 부적합)
-                        try:
-                            dep_res = kiwoom_api.fetch_deposit_kt00001()
-                            cash_krw = int(dep_res.get("d2_entra", "0") or 0)
-                        except Exception:
-                            try:
-                                cash_krw = int(
-                                    bal_res.get("prsm_dpst_aset_amt", "0") or 0
-                                ) - int(bal_res.get("tot_evlt_amt", "0") or 0)
-                            except (TypeError, ValueError):
-                                cash_krw = 0
-                        cache_new = {
-                            "fetched_at": datetime.now().isoformat(timespec="seconds"),
-                            "is_mock": kiwoom_api._is_mock(),
-                            "cash_krw": cash_krw,
-                            "holdings": bal_res.get("acnt_evlt_remn_indv_tot") or [],
-                            "raw": bal_res,
-                        }
-                        ok = save_kiwoom_balance_cache(
-                            cache_new,
-                            commit_msg=(
-                                f"Sync kiwoom balance cache "
-                                f"(cash {cash_krw:,}원, "
-                                f"holdings {len(cache_new['holdings'])}개, "
-                                f"{cache_new['fetched_at']})"
-                            ),
+                        for w in info.get("warnings") or []:
+                            st.warning(w)
+                        ok, how = kiwoom_sync_commit(pf, info)
+                        st.session_state["m5_acct_result"] = (
+                            ("계좌 조회 완료 — " if ok
+                             else "계좌 조회했으나 영속화 실패 — ")
+                            + f"신규 체결 {len(info['trades'])}건 · "
+                            + f"손익 계산 {info['pnl']}건 · "
+                            + f"잔고 변경 {len(info['changes'])}건 · {how}"
                         )
-                        if ok:
-                            st.success("잔고 캐시 저장 + GitHub 커밋 완료.")
-                            st.rerun()
+                        st.rerun()
 
             edit_mode = st.toggle(
                 "편집 모드",
