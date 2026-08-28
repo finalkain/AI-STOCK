@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import json
 import math
+from collections import Counter
 import time
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from backtest.data_loader import load_asset, load_yfinance, ASSET_REGISTRY
 from backtest.turtle_system import calc_atr
 from position_rules import build_plan, MAX_PYRAMID, PYRAMID_STEP_ATR, ADDUP_WINDOW_ATR
 import kiwoom_api
+import performance as perf
 
 # ── 인증 ──────────────────────────────────────────
 def check_password():
@@ -177,6 +179,15 @@ def fmt_money(amount, currency: str = "KRW") -> str:
     if currency == "USD":
         return f"${amount:,.2f}"
     return f"{int(round(amount)):,}원"
+
+
+def md_money(amount, currency: str = "KRW") -> str:
+    """마크다운 컨텍스트(st.metric delta·caption)용 금액 문자열.
+
+    st.metric 의 delta 와 st.caption 은 마크다운으로 렌더되므로 "$100 / $50"
+    처럼 $ 가 두 번 나오면 그 사이가 LaTeX 수식으로 해석돼 깨진다.
+    """
+    return fmt_money(amount, currency).replace("$", "\\$")
 
 
 def money_unit(currency: str = "KRW") -> str:
@@ -3361,6 +3372,245 @@ Stop 상향: {fmt_money(cur_stop, pos_ccy)} → <b>{fmt_money(rec_stop, pos_ccy)
     st.divider()
 
     # (섹터→대장주 통합 뷰는 위 왼쪽 열에 포함됨)
+
+    st.divider()
+
+    # ── M7 계좌별 성과 곡선 ────────────────────────
+    # 입금·출금은 원금을 바꾸지만 매매 실력과 무관하다. 잔고 추이로 수익률을
+    # 재면 입금 한 번에 곡선이 통째로 뒤틀리므로, 체결된 매매만으로 성과를
+    # 재구성한다 (누적 실현손익 = 입출금이 개입할 구조적 여지가 없음).
+    st.markdown("##### M7 계좌별 성과 곡선")
+    st.caption(
+        "매매로 확정된 손익만 집계합니다 — **입금·출금은 반영되지 않습니다.** "
+        "수익률의 분모는 계좌 잔고가 아니라 '실제로 시장에 넣은 돈(누적 투입원가)' "
+        "이라 입출금과 무관합니다. 원화·달러는 환율이 매매 성과에 섞이지 않도록 "
+        "합산하지 않습니다."
+    )
+
+    from drawdown_tracker import PERSONAL_ASSETS as _PERSONAL
+
+    perf_opt = st.columns([1, 1, 2])
+    perf_incl_open = perf_opt[0].checkbox(
+        "보유 중 평가손익 포함", value=True, key="perf_incl_open",
+        help="청산 곡선 끝에 현재 보유 종목의 미실현 손익을 점선으로 덧붙입니다.",
+    )
+    perf_excl_personal = perf_opt[1].checkbox(
+        "규칙 외 개인 투자 제외", value=False, key="perf_excl_personal",
+        help="집계에서 제외: " + ", ".join(sorted(_PERSONAL)),
+    )
+    _perf_ex = _PERSONAL if perf_excl_personal else ()
+
+    def _perf_price_of(asset):
+        pl = pos_plans.get(asset)
+        if pl is not None and getattr(pl, "price", 0):
+            return pl.price
+        r = next((r for r in results if r["name"] == asset), None)
+        return r["price"] if r else None
+
+    def render_account_performance(ccy, label):
+        trades = perf.closed_trades(pf.get("journal", []), ccy,
+                                    exclude_assets=_perf_ex)
+        s = perf.summarize(trades)
+        opens = perf.open_positions_pnl(pf.get("positions", []), ccy,
+                                        _perf_price_of, exclude_assets=_perf_ex)
+        open_pnl = sum(o["pnl"] for o in opens)
+        open_cost = sum(o["cost"] for o in opens)
+
+        if not trades:
+            st.info(
+                label + ": 청산된 매매가 아직 없습니다. 매도가 기록되면 "
+                "곡선이 그려집니다."
+                + (" (현재 보유 평가손익 " + md_money(open_pnl, ccy) + ")"
+                   if opens else "")
+            )
+            return
+
+        # ── 요약 지표 ──
+        m = st.columns(5)
+        m[0].metric(
+            "실현손익", fmt_money(s["total_pnl"], ccy),
+            delta="{:+.2f}%".format(s["ret_pct"]), delta_color="off",
+            help=("청산 {}건 누적. 투입원가 {} 대비"
+                  .format(s["count"], md_money(s["total_cost"], ccy))),
+        )
+        m[1].metric(
+            "보유 평가손익", fmt_money(open_pnl, ccy),
+            delta=("{:+.2f}%".format(open_pnl / open_cost * 100)
+                   if open_cost > 0 else "—"),
+            delta_color="off",
+            help="아직 청산하지 않은 포지션의 미실현 손익 (시세 기준, 매일 변동)",
+        )
+        m[2].metric(
+            "승률", "{:.0f}%".format(s["win_rate"]),
+            delta="{}승 {}패".format(s["wins"], s["losses"]), delta_color="off",
+            help="추세추종은 승률이 낮아도 손익비가 크면 이깁니다. 승률만 보지 마세요.",
+        )
+        m[3].metric(
+            "손익비 (PF)",
+            "{:.2f}".format(s["profit_factor"]) if s["profit_factor"] else "—",
+            delta="평균 {} / {}".format(md_money(s["avg_win"], ccy),
+                                      md_money(s["avg_loss"], ccy)),
+            delta_color="off",
+            help="총이익 ÷ 총손실. 1.0 미만이면 매매할수록 잃는 구조입니다.",
+        )
+        m[4].metric(
+            "최대 낙폭 (실현)", fmt_money(s["max_drawdown"], ccy),
+            delta=("-{:.1f}%".format(s["max_dd_pct"]) if s["max_dd_pct"] else "—"),
+            delta_color="inverse",
+            help="실현손익 신고점 대비 최대 하락폭. 이 깊이를 견뎌야 전략이 유지됩니다.",
+        )
+
+        # ── 메인 차트: 누적 곡선 + 거래별 손익 ──
+        xs = [t["date"] for t in trades]
+        cum = [t["cum_pnl"] for t in trades]
+        cum_ret = [t["cum_ret_pct"] for t in trades]
+        peaks = [t["peak"] for t in trades]
+        pnls = [t["pnl"] for t in trades]
+        labels = [t["asset"] for t in trades]
+        bar_colors = ["#22c55e" if v > 0 else "#ef4444" if v < 0 else "#9ca3af"
+                      for v in pnls]
+
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            row_heights=[0.62, 0.38], vertical_spacing=0.09,
+            specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+            subplot_titles=("누적 실현손익 / 누적 수익률", "거래별 손익"),
+        )
+
+        fig.add_trace(go.Scatter(
+            x=xs, y=peaks, name="신고점", mode="lines",
+            line=dict(color="#6b7280", width=1, dash="dot", shape="hv"),
+            hovertemplate="신고점 %{y:,.2f}<extra></extra>",
+        ), row=1, col=1, secondary_y=False)
+
+        fig.add_trace(go.Scatter(
+            x=xs, y=cum, name="누적 실현손익", mode="lines+markers",
+            line=dict(color="#22c55e" if cum[-1] >= 0 else "#ef4444",
+                      width=2.5, shape="hv"),
+            marker=dict(size=7, color=bar_colors,
+                        line=dict(width=1, color="#111827")),
+            fill="tozeroy",
+            fillcolor=("rgba(34,197,94,0.12)" if cum[-1] >= 0
+                       else "rgba(239,68,68,0.12)"),
+            customdata=list(zip(labels, pnls, cum_ret)),
+            hovertemplate=("%{customdata[0]} · 거래손익 %{customdata[1]:,.2f}<br>"
+                           "누적 %{y:,.2f} (%{customdata[2]:+.2f}%)<extra></extra>"),
+        ), row=1, col=1, secondary_y=False)
+
+        fig.add_trace(go.Scatter(
+            x=xs, y=cum_ret, name="누적 수익률 (%)", mode="lines",
+            line=dict(color="#60a5fa", width=1.4, dash="dash", shape="hv"),
+            hovertemplate="누적 수익률 %{y:+.2f}%<extra></extra>",
+        ), row=1, col=1, secondary_y=True)
+
+        # 보유 중 평가손익 — 확정되지 않았으므로 점선으로 구분
+        if perf_incl_open and opens:
+            today_x = datetime.now().date()
+            if today_x <= xs[-1]:
+                today_x = xs[-1] + timedelta(days=1)
+            fig.add_trace(go.Scatter(
+                x=[xs[-1], today_x], y=[cum[-1], cum[-1] + open_pnl],
+                name="보유 평가손익(미확정)", mode="lines+markers",
+                line=dict(color="#eab308", width=2, dash="dot"),
+                marker=dict(size=8, symbol="diamond", color="#eab308"),
+                hovertemplate="미실현 포함 %{y:,.2f}<extra></extra>",
+            ), row=1, col=1, secondary_y=False)
+
+        # 날짜 축 위의 Bar 는 폭이 ms 단위 — 지정하지 않으면 실오라기처럼 얇다.
+        _span_days = max((xs[-1] - xs[0]).days, 1)
+        _bar_days = max(_span_days / 60.0, 0.6)  # 축 길이의 ~1.7%
+        # 같은 날 여러 건을 청산하면 x 가 같아 막대가 서로 가린다 → 하루 안에서
+        # 나란히 배치해 작은 손실이 큰 이익 뒤로 숨지 않게 한다.
+        _per_day = Counter(xs)
+        _idx: dict = {}
+        bar_x = []
+        for _d in xs:
+            _i = _idx.get(_d, 0)
+            _idx[_d] = _i + 1
+            _off = (_i - (_per_day[_d] - 1) / 2) * _bar_days
+            bar_x.append(datetime.combine(_d, datetime.min.time())
+                         + timedelta(days=_off))
+        fig.add_trace(go.Bar(
+            x=bar_x, y=pnls, name="거래손익", marker_color=bar_colors,
+            width=_bar_days * 86400000,
+            customdata=list(zip(labels, [t["ret_pct"] for t in trades])),
+            hovertemplate=("%{customdata[0]} · %{y:,.2f} "
+                           "(%{customdata[1]:+.2f}%)<extra></extra>"),
+        ), row=2, col=1)
+
+        fig.add_hline(y=0, line=dict(color="#4b5563", width=1), row=2, col=1)
+        fig.update_yaxes(title_text=money_unit(ccy), row=1, col=1,
+                         secondary_y=False, zeroline=True,
+                         zerolinecolor="#4b5563")
+        fig.update_yaxes(title_text="%", row=1, col=1, secondary_y=True,
+                         showgrid=False)
+        fig.update_yaxes(title_text=money_unit(ccy), row=2, col=1)
+        fig.update_layout(
+            template="plotly_dark", height=520, hovermode="x unified",
+            margin=dict(l=10, r=10, t=54, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.06,
+                        xanchor="right", x=1),
+        )
+        st.plotly_chart(fig, use_container_width=True, key="perf_curve_" + ccy)
+
+        # ── 월별 손익 ──
+        months = perf.monthly_pnl(trades)
+        mfig = go.Figure(go.Bar(
+            x=[k for k, _ in months], y=[v for _, v in months],
+            marker_color=["#22c55e" if v > 0 else "#ef4444" for _, v in months],
+            hovertemplate="%{x} · %{y:,.2f}<extra></extra>",
+        ))
+        mfig.add_hline(y=0, line=dict(color="#4b5563", width=1))
+        mfig.update_layout(
+            template="plotly_dark", height=230, title="월별 실현손익",
+            margin=dict(l=10, r=10, t=44, b=10), showlegend=False,
+            yaxis_title=money_unit(ccy), xaxis_type="category", bargap=0.55,
+        )
+        st.plotly_chart(mfig, use_container_width=True, key="perf_month_" + ccy)
+
+        # ── 해석 ──
+        _hold = ("평균 보유 {:.0f}일 · ".format(s["avg_hold_days"])
+                 if s["avg_hold_days"] is not None else "")
+        st.caption(
+            "{} ~ {} · 청산 {}건 · {}거래당 기대값 {} · 최고 {} {} · 최악 {} {}"
+            .format(s["first_date"], s["last_date"], s["count"], _hold,
+                    md_money(s["expectancy"], ccy),
+                    s["best"]["asset"], md_money(s["best"]["pnl"], ccy),
+                    s["worst"]["asset"], md_money(s["worst"]["pnl"], ccy))
+        )
+        if s["profit_factor"] is not None and s["profit_factor"] < 1:
+            st.warning(
+                "손익비 {:.2f} — 총손실이 총이익보다 큽니다. 매매를 늘릴 게 아니라 "
+                "손절을 더 빨리 하거나 이익을 더 길게 끌어야 합니다."
+                .format(s["profit_factor"])
+            )
+
+        # ── 청산 거래 표 ──
+        with st.expander("청산 거래 {}건 상세".format(s["count"])):
+            st.dataframe(pd.DataFrame([{
+                "날짜": t["date"].isoformat(),
+                "종목": t["asset"],
+                "수량": "{:,.0f}".format(t["shares"]),
+                "투입원가": fmt_money(t["cost"], ccy),
+                "손익": fmt_money(t["pnl"], ccy),
+                "수익률": "{:+.2f}%".format(t["ret_pct"]),
+                "보유일": t["hold_days"] if t["hold_days"] is not None else "—",
+                "누적손익": fmt_money(t["cum_pnl"], ccy),
+                "누적수익률": "{:+.2f}%".format(t["cum_ret_pct"]),
+            } for t in reversed(trades)]),
+                use_container_width=True, hide_index=True,
+                height=min(len(trades) * 38 + 40, 420))
+            st.caption(
+                "FIFO(선입선출)로 매수 로트와 매도를 짝지어 계산합니다. "
+                "매매일지 시작 이전에 매수한 종목의 매도는 원가를 알 수 없어 "
+                "기록된 손익에서 역산하므로 수익률이 보수적으로 나옵니다."
+            )
+
+    perf_tab_kr, perf_tab_us = st.tabs(["🇰🇷 국내 계좌 (원화)", "🇺🇸 미국 계좌 (달러)"])
+    with perf_tab_kr:
+        render_account_performance("KRW", "국내 계좌")
+    with perf_tab_us:
+        render_account_performance("USD", "미국 계좌")
 
     st.divider()
 
