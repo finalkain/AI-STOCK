@@ -1,7 +1,7 @@
 {
   "total_capital": 1140777,
   "cash": 1140777,
-  "cash_usd": 3835.57,
+  "cash_usd": 4057.36,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,21 +10,10 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 227.47,
-      "current_value": 227.3,
+      "current_value": 218.4,
       "kiwoom_stk_cd": "CRWD",
       "entry_date": "2026-08-18",
       "trailing_stop": 210.32,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
-      "asset": "NVDA",
-      "currency": "USD",
-      "shares": 1,
-      "avg_price": 228.41,
-      "current_value": 226.61,
-      "kiwoom_stk_cd": "NVDA",
-      "entry_date": "",
-      "trailing_stop": 222.34,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -32,7 +21,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 843.24,
+      "current_value": 849.0,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 131.98,
@@ -588,9 +577,47 @@
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "CRWD",
       "kiwoom_fee_usd": 0.56
+    },
+    {
+      "date": "2026-08-31",
+      "action": "SELL",
+      "asset": "MRK",
+      "currency": "USD",
+      "shares": 2,
+      "price": 149.54,
+      "reason": "키움 자동 동기화 (머크) · 매도 $149.54 - 평단 $130.49 = +38.10$",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "MRK",
+      "kiwoom_fee_usd": 0.0,
+      "pnl": 38.1
+    },
+    {
+      "date": "2026-08-31",
+      "action": "SELL",
+      "asset": "MRK",
+      "currency": "USD",
+      "shares": 1,
+      "price": 149.55,
+      "reason": "키움 자동 동기화 (머크) · 매도 $149.55 - 평단 $130.49 = +19.06$",
+      "kiwoom_deal_no": "000000002",
+      "kiwoom_stk_cd": "MRK",
+      "kiwoom_fee_usd": 1.12,
+      "pnl": 19.06
+    },
+    {
+      "date": "2026-08-31",
+      "action": "BUY",
+      "asset": "NVDA",
+      "currency": "USD",
+      "shares": 1,
+      "price": 228.41,
+      "reason": "키움 자동 동기화 (엔비디아)",
+      "kiwoom_deal_no": "000000003",
+      "kiwoom_stk_cd": "NVDA",
+      "kiwoom_fee_usd": 0.57
     }
   ],
-  "total_capital_usd": 5132.72,
+  "total_capital_usd": 5124.76,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
