@@ -10,7 +10,7 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 227.47,
-      "current_value": 218.4,
+      "current_value": 219.2,
       "kiwoom_stk_cd": "CRWD",
       "entry_date": "2026-08-18",
       "trailing_stop": 210.32,
@@ -21,7 +21,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 849.0,
+      "current_value": 842.16,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 131.98,
@@ -617,7 +617,7 @@
       "kiwoom_fee_usd": 0.57
     }
   ],
-  "total_capital_usd": 5124.76,
+  "total_capital_usd": 5118.72,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
