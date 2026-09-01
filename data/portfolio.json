@@ -1,7 +1,7 @@
 {
   "total_capital": 1140777,
   "cash": 1140777,
-  "cash_usd": 4057.36,
+  "cash_usd": 4057.37,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,7 +10,7 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 227.47,
-      "current_value": 219.2,
+      "current_value": 230.63,
       "kiwoom_stk_cd": "CRWD",
       "entry_date": "2026-08-18",
       "trailing_stop": 210.32,
@@ -21,7 +21,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 842.16,
+      "current_value": 864.3,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 131.98,
@@ -615,9 +615,22 @@
       "kiwoom_deal_no": "000000003",
       "kiwoom_stk_cd": "NVDA",
       "kiwoom_fee_usd": 0.57
+    },
+    {
+      "date": "2026-09-01",
+      "action": "SELL",
+      "asset": "NVDA",
+      "currency": "USD",
+      "shares": 1,
+      "price": 222.35,
+      "reason": "키움 자동 동기화 (엔비디아) · 매도 $222.35 - 평단 $228.41 = -6.06$",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "NVDA",
+      "kiwoom_fee_usd": 0.55,
+      "pnl": -6.06
     }
   ],
-  "total_capital_usd": 5118.72,
+  "total_capital_usd": 5152.3,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
