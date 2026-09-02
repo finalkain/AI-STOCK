@@ -1,19 +1,30 @@
 {
-  "total_capital": 1140777,
-  "cash": 1140777,
+  "total_capital": 1134276,
+  "cash": 913747,
   "cash_usd": 4057.37,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
     {
+      "asset": "신한지주",
+      "currency": "KRW",
+      "shares": 2,
+      "avg_price": 113500,
+      "current_value": 221000,
+      "kiwoom_stk_cd": "A055550",
+      "entry_date": "2026-09-02",
+      "trailing_stop": 0,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
       "asset": "CRWD",
       "currency": "USD",
       "shares": 1,
       "avg_price": 227.47,
-      "current_value": 230.63,
+      "current_value": 215.2,
       "kiwoom_stk_cd": "CRWD",
       "entry_date": "2026-08-18",
-      "trailing_stop": 210.32,
+      "trailing_stop": 210.81,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -21,10 +32,10 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 864.3,
+      "current_value": 851.16,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
-      "trailing_stop": 131.98,
+      "trailing_stop": 132.64,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     }
   ],
@@ -628,9 +639,20 @@
       "kiwoom_stk_cd": "NVDA",
       "kiwoom_fee_usd": 0.55,
       "pnl": -6.06
+    },
+    {
+      "date": "2026-09-02",
+      "action": "BUY",
+      "asset": "신한지주",
+      "currency": "KRW",
+      "shares": 2,
+      "price": 113500,
+      "reason": "키움 자동 동기화",
+      "kiwoom_ord_no": "0358514",
+      "kiwoom_stk_cd": "A055550"
     }
   ],
-  "total_capital_usd": 5152.3,
+  "total_capital_usd": 5123.73,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
