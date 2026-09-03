@@ -1,7 +1,7 @@
 {
-  "total_capital": 1134276,
+  "total_capital": 1142659,
   "cash": 913747,
-  "cash_usd": 4057.37,
+  "cash_usd": 4267.18,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,21 +10,10 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 113500,
-      "current_value": 221000,
+      "current_value": 229400,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-09-02",
-      "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
-      "asset": "CRWD",
-      "currency": "USD",
-      "shares": 1,
-      "avg_price": 227.47,
-      "current_value": 215.2,
-      "kiwoom_stk_cd": "CRWD",
-      "entry_date": "2026-08-18",
-      "trailing_stop": 210.81,
+      "trailing_stop": 108240,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -32,10 +21,10 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 851.16,
+      "current_value": 845.7,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
-      "trailing_stop": 132.64,
+      "trailing_stop": 134.82,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     }
   ],
@@ -652,7 +641,7 @@
       "kiwoom_stk_cd": "A055550"
     }
   ],
-  "total_capital_usd": 5123.73,
+  "total_capital_usd": 5112.88,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
