@@ -1441,15 +1441,27 @@ def main():
 {_fmt_fund(s)}</div>"""
 
             # ── 📋 오늘의 예약 매수 플랜 — 한도 내 자동 선별 ──
-            # 후보 전부를 살 수는 없다. 우선순위(조정장돌파 > A급 > 내일후보 > 돌파대기)
-            # 순으로 ① 통화별 현금 ② 하루 신규 리스크 한도(유닛 수 × 축소배수)를
-            # 차감해 가며 채워지는 종목만 ✅ 추천, 넘치면 ⏸ 예비로 표시만 한다.
+            # 후보 전부를 살 수는 없다. 우선순위 순으로 ① 통화별 현금
+            # ② 하루 신규 리스크 한도(유닛 수 × 축소배수)를 차감해 가며
+            # 채워지는 종목만 ✅ 추천, 넘치면 ⏸ 예비로 표시만 한다.
+            #
+            # 순서 근거 — backtest/priority_portfolio_sim.py (2015~2026, 145종목,
+            # 진입·청산·사이징 동일하게 두고 '채우는 순서'만 바꾼 포트폴리오 비교):
+            #   현행 ①②③④          21.1배 / MDD -32.2%
+            #   한국 ① 강등          23.9배 / MDD -29.0%   ← 채택 (2022~ 구간에서도 개선)
+            #   순서 전면 역전 ④③②①  26.5배지만 2022~ 구간에선 오히려 악화 → 기각
+            # 한국 종목의 조정장돌파는 평균R +0.03 · PF 1.06으로 기대값이 사실상 0인데
+            # 최우선이라 하루 한도의 38%를 소모하고 있었다. 미국 조정장돌파는
+            # PF 1.71로 유효해 최우선을 유지한다.
             MAX_NEW_UNITS_PER_DAY = 2
             plan_rows, _seen_plan = [], set()
-            _prio_src = ([("① 조정장돌파", x) for x in downbo_list]
+            _dbo_us = [x for x in downbo_list if not x[1].is_kr]
+            _dbo_kr = [x for x in downbo_list if x[1].is_kr]
+            _prio_src = ([("① 조정장돌파", x) for x in _dbo_us]
                          + [("② A급", x) for x in a_list]
                          + [("③ 내일후보", x) for x in nextday_list]
-                         + [("④ 돌파대기", x) for x in reserve_list])
+                         + [("④ 돌파대기", x) for x in reserve_list]
+                         + [("⑤ 조정장돌파·국내", x) for x in _dbo_kr])
             for grade, (_sec, s) in _prio_src:
                 if s.ticker in _seen_plan or s.disclosure_risk:
                     continue
@@ -1486,13 +1498,57 @@ def main():
                 st.markdown(f"""
 <div class="signal-buy">
 <b>📋 오늘의 예약 매수 플랜 — 후보 {len(plan_rows)}종목 중 ✅ {n_rec}종목 선별</b><br>
-<small>우선순위(조정장돌파 → A급 → 내일후보 → 돌파대기) 순으로 통화별 현금과
-하루 신규 리스크 한도({MAX_NEW_UNITS_PER_DAY}유닛{_mnote}) 안에서 자동 선별.
+<small>모든 등급은 <b>동일한 방식</b>으로 삽니다 — 피벗 바로 위에 예약을 걸고,
+진짜 돌파해서 체결될 때만 매수. 등급은 "무엇을 살까"가 아니라
+<b>하루 {MAX_NEW_UNITS_PER_DAY}유닛{_mnote} 한도를 누구부터 채울까</b>의 순서일 뿐입니다.<br>
 ⏸ 예비는 앞 종목이 미체결로 예약 취소되면 순번 승계.</small>
 </div>""", unsafe_allow_html=True)
+
+                with st.expander("❓ 우선순위 등급이 무슨 뜻인가요? (백테스트 근거 포함)"):
+                    st.markdown(f"""
+**네 등급 모두 사도 되는 신호입니다.** 2015~2026년 백테스트에서 넷 다 기대값이
+플러스였고, ②③④의 차이는 통계적 노이즈 범위(1시그마 이내)였습니다.
+등급은 우열이 아니라 **한도가 모자랄 때의 양보 순서**입니다.
+
+| 순위 | 뜻 | 쉽게 말하면 | 백테 PF |
+|---|---|---|---|
+| ① 조정장돌파 | 시장은 조정인데 이 종목만 신고가 | 남들 빠질 때 혼자 오름 (**미국주 한정**) | 1.71 |
+| ② A급 | 돌파 직후 + 거래량·갭·변동성 전부 합격 | 교과서적인 매수 적기 | 1.46 |
+| ③ 내일후보 | 최근 돌파 후 피벗까지 눌렸다 강하게 마감 | 돌파하고 한 번 쉬는 중 | 1.53 |
+| ④ 돌파대기 | 아직 피벗 아래 — 돌파하면 자동 체결 | **가장 흔하고 기대값도 최상위** | 1.51 |
+| ⑤ 조정장돌파·국내 | ①과 같은 조건이지만 한국 종목 | 국내에선 통하지 않음 → 후순위 | 1.06 |
+
+**⑤를 맨 뒤로 내린 이유** — 한국 종목의 조정장 돌파는 평균R **+0.03**, PF 1.06으로
+기대값이 사실상 0인데, 예전엔 최우선이라 하루 한도의 **38%**를 이 신호가
+소모하고 있었습니다. 같은 조건을 미국 종목에 적용하면 PF 1.71로 잘 작동해
+①은 그대로 두었습니다.
+
+**포트폴리오 백테스트** (진입·청산·사이징을 전부 똑같이 두고 *채우는 순서*만 바꿈):
+
+| 순서 정책 | 2015~2026 | 2022~2026 | MDD |
+|---|---|---|---|
+| 예전 (①②③④, 국내 ① 최우선) | 21.1배 | 3.84배 | -32.2% |
+| **현재 (국내 ①을 ⑤로 강등)** | **23.9배** | **4.22배** | **-29.0%** |
+| 순서 전면 역전 (④③②①) | 26.5배 | 3.50배 ↓ | -33.6% |
+
+역전이 전체 기간엔 좋아 보이지만 최근 구간에서 오히려 나빠져 채택하지 않았습니다.
+국내 ① 강등만이 **두 기간 모두에서** 개선됐습니다.
+
+> ⚠️ 승률은 원래 33~41%입니다. 절반 이상 지는 게 정상이고, 수익은 상위 5%
+> 거래가 만듭니다. 몇 번의 매매만으로는 손실만 경험하는 것이 통계적으로 자연스럽습니다.
+""")
+
+                _grade_note = {
+                    "① 조정장돌파": "조정장 신고가(美) · PF 1.71",
+                    "② A급": "돌파 직후 전 조건 합격 · PF 1.46",
+                    "③ 내일후보": "돌파 후 피벗 눌림 · PF 1.53",
+                    "④ 돌파대기": "피벗 아래 예약 · 기대값 최상위 PF 1.51",
+                    "⑤ 조정장돌파·국내": "국내는 기대값 ≈ 0 · PF 1.06 → 후순위",
+                }
                 plan_df = pd.DataFrame([{
                     "상태": r["status"],
                     "우선순위": r["grade"],
+                    "왜 이 순위인가": _grade_note.get(r["grade"], ""),
                     "종목": r["name"],
                     "통화": r["ccy"],
                     "예약가": fmt_money(r["rp"], r["ccy"]),
@@ -1503,23 +1559,32 @@ def main():
                 } for r in plan_rows])
                 st.dataframe(plan_df, hide_index=True, use_container_width=True)
 
-            # ── ★ 조정장 돌파 (burge out) — 최상급 셋업 ──
-            # 시장(지수)이 조정·하락 국면인데 종목이 신고가를 돌파 →
-            # 기관이 조정기에 사들이는 진짜 추세. 트레이딩 노트의 핵심 엣지.
+            # ── ★ 조정장 돌파 (burge out) ──
+            # 시장(지수)이 조정·하락 국면인데 종목이 신고가를 돌파.
+            # 백테스트(2015~2026): 미국주는 PF 1.71로 유효하나 한국주는 PF 1.06,
+            # 평균R +0.03으로 기대값이 사실상 0 → 국내 종목은 예약 플랜 후순위(⑤).
             if downbo_list:
+                _n_kr_dbo = sum(1 for _s, x in downbo_list if x.is_kr)
+                _kr_warn = (f"<br>⚠️ 이 중 국내 {_n_kr_dbo}종목은 백테스트상 기대값이 "
+                            f"거의 0(PF 1.06)이라 예약 플랜에서 <b>후순위(⑤)</b>로 밀립니다."
+                            if _n_kr_dbo else "")
                 st.markdown(f"""
 <div class="signal-buy">
 <b>★ 조정장 돌파 — {len(downbo_list)}종목 (burge out)</b><br>
-<small>시장 지수가 조정/하락 중인데 신고가 돌파 — 시장 대비 상대강도가 가장 신뢰되는 구간</small>
+<small>시장 지수가 조정/하락 중인데 신고가 돌파.
+백테스트상 <b>미국주에서만</b> 강한 엣지(PF 1.71){_kr_warn}</small>
 </div>""", unsafe_allow_html=True)
                 for sector_name, s in downbo_list:
                     s_ccy = "KRW" if s.is_kr else "USD"
                     brk = "55일돌파" if s.breakout_55d else ("20일돌파" if s.breakout_20d else "추세")
                     acc = f" · 기관매집 {s.ud_vol_ratio:.1f}x" if s.ud_vol_ratio >= 1.1 else ""
+                    _edge = ("<small>⚠️ 국내 조정장돌파 — 백테 PF 1.06(기대값 ≈ 0) · "
+                             "예약 플랜 후순위</small><br>" if s.is_kr else
+                             "<small>✓ 미국 조정장돌파 — 백테 PF 1.71</small><br>")
                     st.markdown(f"""
 <div class="signal-hold">
 <b>{s.name}</b> <small>[{s_ccy}]</small> ({sector_name}) — {brk} · <b>상대RS {s.rs_rel:+.0f}</b>{acc}<br>
-현재가: {fmt_money(s.price, s_ccy)} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · ATR {s.atr_pct:.1f}%<br>
+{_edge}현재가: {fmt_money(s.price, s_ccy)} · 거래량 {s.volume_ratio:.1f}x · 갭 {s.gap_pct:+.1f}% · ATR {s.atr_pct:.1f}%<br>
 {breakout_plan_html(s)}{_reserve_qty_line(s)}<small>시장 지수 조정 국면 · [{s.filter_status}]</small>
 </div>""", unsafe_allow_html=True)
 
