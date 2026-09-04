@@ -1,7 +1,7 @@
 {
-  "total_capital": 1142260,
+  "total_capital": 1133877,
   "cash": 913747,
-  "cash_usd": 4267.18,
+  "cash_usd": 4038.21,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,10 +10,21 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 113500,
-      "current_value": 229000,
+      "current_value": 220600,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-09-02",
       "trailing_stop": 108240,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
+      "asset": "NVDA",
+      "currency": "USD",
+      "shares": 1,
+      "avg_price": 228.4,
+      "current_value": 230.3,
+      "kiwoom_stk_cd": "NVDA",
+      "entry_date": "",
+      "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
@@ -21,7 +32,7 @@
       "currency": "USD",
       "shares": 6,
       "avg_price": 150.35,
-      "current_value": 844.2,
+      "current_value": 906.0,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -639,9 +650,22 @@
       "reason": "키움 자동 동기화",
       "kiwoom_ord_no": "0358514",
       "kiwoom_stk_cd": "A055550"
+    },
+    {
+      "date": "2026-09-04",
+      "action": "SELL",
+      "asset": "CRWD",
+      "currency": "USD",
+      "shares": 1,
+      "price": 210.355,
+      "reason": "키움 자동 동기화 (크라우드스트라이크홀딩스) · 매도 $210.35 - 평단 $227.47 = -17.12$",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "CRWD",
+      "kiwoom_fee_usd": 0.52,
+      "pnl": -17.12
     }
   ],
-  "total_capital_usd": 5111.38,
+  "total_capital_usd": 5174.51,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
