@@ -1,7 +1,7 @@
 {
-  "total_capital": 1134476,
+  "total_capital": 1134076,
   "cash": 913747,
-  "cash_usd": 4038.22,
+  "cash_usd": 4108.01,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,29 +10,18 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 113500,
-      "current_value": 221200,
+      "current_value": 220800,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-09-02",
       "trailing_stop": 108240,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
     {
-      "asset": "NVDA",
-      "currency": "USD",
-      "shares": 1,
-      "avg_price": 228.4,
-      "current_value": 226.26,
-      "kiwoom_stk_cd": "NVDA",
-      "entry_date": "2026-09-07",
-      "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
       "asset": "SPCX",
       "currency": "USD",
-      "shares": 6,
-      "avg_price": 150.35,
-      "current_value": 919.56,
+      "shares": 7,
+      "avg_price": 150.2714,
+      "current_value": 1035.86,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -675,9 +664,21 @@
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "NVDA",
       "kiwoom_fee_usd": 0.57
+    },
+    {
+      "date": "2026-09-11",
+      "action": "BUY",
+      "asset": "SPCX",
+      "currency": "USD",
+      "shares": 1,
+      "price": 149.8,
+      "reason": "키움 자동 동기화 (스페이스X)",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "SPCX",
+      "kiwoom_fee_usd": 0.37
     }
   ],
-  "total_capital_usd": 5184.04,
+  "total_capital_usd": 5143.87,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
