@@ -1,7 +1,7 @@
 {
-  "total_capital": 1142060,
+  "total_capital": 1137469,
   "cash": 913747,
-  "cash_usd": 3778.2,
+  "cash_usd": 3543.22,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,7 +10,7 @@
       "currency": "KRW",
       "shares": 2,
       "avg_price": 113500,
-      "current_value": 228800,
+      "current_value": 224200,
       "kiwoom_stk_cd": "A055550",
       "entry_date": "2026-09-02",
       "trailing_stop": 108240,
@@ -21,8 +21,19 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 328.98,
-      "current_value": 329.99,
+      "current_value": 330.64,
       "kiwoom_stk_cd": "AAPL",
+      "entry_date": "2026-09-15",
+      "trailing_stop": 0,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
+    {
+      "asset": "CRWD",
+      "currency": "USD",
+      "shares": 1,
+      "avg_price": 234.4,
+      "current_value": 233.38,
+      "kiwoom_stk_cd": "CRWD",
       "entry_date": "",
       "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
@@ -32,7 +43,7 @@
       "currency": "USD",
       "shares": 7,
       "avg_price": 150.2714,
-      "current_value": 1038.31,
+      "current_value": 1039.43,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -700,9 +711,21 @@
       "kiwoom_stk_cd": "NVDA",
       "kiwoom_fee_usd": 0.55,
       "pnl": -7.88
+    },
+    {
+      "date": "2026-09-15",
+      "action": "BUY",
+      "asset": "AAPL",
+      "currency": "USD",
+      "shares": 1,
+      "price": 328.98,
+      "reason": "키움 자동 동기화 (애플)",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "AAPL",
+      "kiwoom_fee_usd": 0.82
     }
   ],
-  "total_capital_usd": 5146.5,
+  "total_capital_usd": 5146.67,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
