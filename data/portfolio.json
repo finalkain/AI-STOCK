@@ -1,7 +1,7 @@
 {
   "total_capital": 1117849,
   "cash": 1117849,
-  "cash_usd": 2527.87,
+  "cash_usd": 2382.36,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,7 +10,7 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 328.98,
-      "current_value": 343.75,
+      "current_value": 345.65,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-09-15",
       "trailing_stop": 0,
@@ -21,7 +21,7 @@
       "currency": "USD",
       "shares": 4,
       "avg_price": 267.5,
-      "current_value": 1145.28,
+      "current_value": 1134.52,
       "kiwoom_stk_cd": "ABBV",
       "entry_date": "2026-09-25",
       "trailing_stop": 0,
@@ -32,7 +32,7 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 183.86,
-      "current_value": 173.22,
+      "current_value": 173.88,
       "kiwoom_stk_cd": "QCOM",
       "entry_date": "2026-09-17",
       "trailing_stop": 0,
@@ -41,9 +41,9 @@
     {
       "asset": "SPCX",
       "currency": "USD",
-      "shares": 7,
-      "avg_price": 150.2714,
-      "current_value": 1087.87,
+      "shares": 8,
+      "avg_price": 149.63,
+      "current_value": 1183.12,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -834,7 +834,7 @@
       "pnl": -10.88
     }
   ],
-  "total_capital_usd": 5277.99,
+  "total_capital_usd": 5219.53,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
