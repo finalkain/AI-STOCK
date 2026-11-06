@@ -1,16 +1,27 @@
 {
-  "total_capital": 1117849,
-  "cash": 1117849,
-  "cash_usd": 1950.52,
+  "total_capital": 1116259,
+  "cash": 551669,
+  "cash_usd": 2101.39,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
+    {
+      "asset": "삼성전자",
+      "currency": "KRW",
+      "shares": 3,
+      "avg_price": 188700,
+      "current_value": 565800,
+      "kiwoom_stk_cd": "A005930",
+      "entry_date": "2026-11-06",
+      "trailing_stop": 0,
+      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
+    },
     {
       "asset": "AAPL",
       "currency": "USD",
       "shares": 1,
       "avg_price": 328.98,
-      "current_value": 350.0,
+      "current_value": 340.99,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-09-15",
       "trailing_stop": 0,
@@ -21,20 +32,9 @@
       "currency": "USD",
       "shares": 4,
       "avg_price": 267.5,
-      "current_value": 1192.28,
+      "current_value": 1146.0,
       "kiwoom_stk_cd": "ABBV",
       "entry_date": "2026-09-25",
-      "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
-      "asset": "QCOM",
-      "currency": "USD",
-      "shares": 1,
-      "avg_price": 183.86,
-      "current_value": 156.9,
-      "kiwoom_stk_cd": "QCOM",
-      "entry_date": "2026-09-17",
       "trailing_stop": 0,
       "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
     },
@@ -43,7 +43,7 @@
       "currency": "USD",
       "shares": 11,
       "avg_price": 147.9836,
-      "current_value": 1466.85,
+      "current_value": 1383.36,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -868,9 +868,20 @@
       "kiwoom_deal_no": "000000001",
       "kiwoom_stk_cd": "SPCX",
       "kiwoom_fee_usd": 0.35
+    },
+    {
+      "date": "2026-11-06",
+      "action": "BUY",
+      "asset": "삼성전자",
+      "currency": "KRW",
+      "shares": 3,
+      "price": 188700,
+      "reason": "키움 자동 동기화",
+      "kiwoom_ord_no": "0540914",
+      "kiwoom_stk_cd": "A005930"
     }
   ],
-  "total_capital_usd": 5116.55,
+  "total_capital_usd": 4971.74,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
