@@ -1,27 +1,16 @@
 {
-  "total_capital": 1107875,
-  "cash": 551669,
+  "total_capital": 1153374,
+  "cash": 1153374,
   "cash_usd": 2101.4,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
     {
-      "asset": "삼성전자",
-      "currency": "KRW",
-      "shares": 3,
-      "avg_price": 188700,
-      "current_value": 557400,
-      "kiwoom_stk_cd": "A005930",
-      "entry_date": "2026-11-06",
-      "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
       "asset": "AAPL",
       "currency": "USD",
       "shares": 1,
       "avg_price": 328.98,
-      "current_value": 344.0,
+      "current_value": 351.1,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-09-15",
       "trailing_stop": 0,
@@ -32,7 +21,7 @@
       "currency": "USD",
       "shares": 4,
       "avg_price": 267.5,
-      "current_value": 1178.16,
+      "current_value": 1176.36,
       "kiwoom_stk_cd": "ABBV",
       "entry_date": "2026-09-25",
       "trailing_stop": 0,
@@ -43,7 +32,7 @@
       "currency": "USD",
       "shares": 11,
       "avg_price": 147.9836,
-      "current_value": 1483.35,
+      "current_value": 1559.58,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -892,9 +881,21 @@
       "kiwoom_stk_cd": "QCOM",
       "kiwoom_fee_usd": 0.37,
       "pnl": -32.6
+    },
+    {
+      "date": "2026-11-10",
+      "action": "SELL",
+      "asset": "삼성전자",
+      "currency": "KRW",
+      "shares": 3,
+      "price": 201000,
+      "reason": "키움 자동 동기화 · 매도 201,000 - 평단 188,700 = +36,900원",
+      "kiwoom_ord_no": "0077442",
+      "kiwoom_stk_cd": "A005930",
+      "pnl": 36900
     }
   ],
-  "total_capital_usd": 5106.91,
+  "total_capital_usd": 5188.44,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
