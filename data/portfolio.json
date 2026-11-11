@@ -1,6 +1,6 @@
 {
-  "total_capital": 1153374,
-  "cash": 1153374,
+  "total_capital": 1153384,
+  "cash": 1153384,
   "cash_usd": 2101.4,
   "margin_value": 1130400,
   "risk_pct": 0.01,
@@ -10,7 +10,7 @@
       "currency": "USD",
       "shares": 1,
       "avg_price": 328.98,
-      "current_value": 351.1,
+      "current_value": 347.25,
       "kiwoom_stk_cd": "AAPL",
       "entry_date": "2026-09-15",
       "trailing_stop": 0,
@@ -21,7 +21,7 @@
       "currency": "USD",
       "shares": 4,
       "avg_price": 267.5,
-      "current_value": 1176.36,
+      "current_value": 1168.16,
       "kiwoom_stk_cd": "ABBV",
       "entry_date": "2026-09-25",
       "trailing_stop": 0,
@@ -32,7 +32,7 @@
       "currency": "USD",
       "shares": 11,
       "avg_price": 147.9836,
-      "current_value": 1559.58,
+      "current_value": 1601.27,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -895,7 +895,7 @@
       "pnl": 36900
     }
   ],
-  "total_capital_usd": 5188.44,
+  "total_capital_usd": 5218.08,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19

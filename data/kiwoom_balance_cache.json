@@ -1,6 +1,6 @@
 {
-  "fetched_at": "2026-11-10T16:30:07",
-  "cash_krw": 1153374,
+  "fetched_at": "2026-11-11T16:30:08",
+  "cash_krw": 1153384,
   "cash_usd": 2101.4,
   "holdings": [],
   "us_holdings": [
@@ -17,18 +17,18 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "328.9800",
-      "now_pric": "351.1000",
-      "evlt_amt": "351.1000",
-      "pl_amt": "20.4200",
-      "pl_rt": "6.20",
-      "evlt_amt_krw": "000000471509",
-      "pl_amt_krw": "000000027423",
+      "now_pric": "347.2500",
+      "evlt_amt": "347.2500",
+      "pl_amt": "16.5800",
+      "pl_rt": "5.03",
+      "evlt_amt_krw": "000000466860",
+      "pl_amt_krw": "000000022290",
       "natn_nm": "미국",
-      "exch_rate": "1342.95",
-      "frgn_stk_book_uv_krw": "000000441803",
-      "now_pric_krw": "000000471509",
+      "exch_rate": "1344.45",
+      "frgn_stk_book_uv_krw": "000000442297",
+      "now_pric_krw": "000000466860",
       "frgn_stk_book_amt": "328.9800",
-      "frgn_stk_book_amt_krw": "000000441803"
+      "frgn_stk_book_amt_krw": "000000442297"
     },
     {
       "stex_nm": "미국",
@@ -43,18 +43,18 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "267.5000",
-      "now_pric": "294.0900",
-      "evlt_amt": "1176.3600",
-      "pl_amt": "100.7500",
-      "pl_rt": "9.41",
-      "evlt_amt_krw": "000001579792",
-      "pl_amt_krw": "000000135302",
+      "now_pric": "292.0400",
+      "evlt_amt": "1168.1600",
+      "pl_amt": "92.5700",
+      "pl_rt": "8.65",
+      "evlt_amt_krw": "000001570532",
+      "pl_amt_krw": "000000124455",
       "natn_nm": "미국",
-      "exch_rate": "1342.95",
-      "frgn_stk_book_uv_krw": "000000359239",
-      "now_pric_krw": "000000394948",
+      "exch_rate": "1344.45",
+      "frgn_stk_book_uv_krw": "000000359640",
+      "now_pric_krw": "000000392633",
       "frgn_stk_book_amt": "1070.0000",
-      "frgn_stk_book_amt_krw": "000001436956"
+      "frgn_stk_book_amt_krw": "000001438561"
     },
     {
       "stex_nm": "미국",
@@ -69,23 +69,23 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "147.9836",
-      "now_pric": "141.7800",
-      "evlt_amt": "1559.5800",
-      "pl_amt": "-76.2000",
-      "pl_rt": "-4.68",
-      "evlt_amt_krw": "000002094437",
-      "pl_amt_krw": "-00000102332",
+      "now_pric": "145.5700",
+      "evlt_amt": "1601.2700",
+      "pl_amt": "-34.6200",
+      "pl_rt": "-2.12",
+      "evlt_amt_krw": "000002152827",
+      "pl_amt_krw": "-00000046544",
       "natn_nm": "미국",
-      "exch_rate": "1342.95",
-      "frgn_stk_book_uv_krw": "000000198734",
-      "now_pric_krw": "000000190403",
+      "exch_rate": "1344.45",
+      "frgn_stk_book_uv_krw": "000000198956",
+      "now_pric_krw": "000000195711",
       "frgn_stk_book_amt": "1627.8200",
-      "frgn_stk_book_amt_krw": "000002186080"
+      "frgn_stk_book_amt_krw": "000002188522"
     }
   ],
   "raw": {
-    "prsm_dpst_aset_amt": 1153374,
+    "prsm_dpst_aset_amt": 1153384,
     "entr": 551669,
-    "us_tot_evlt_amt": 3087.04
+    "us_tot_evlt_amt": 3116.68
   }
 }
