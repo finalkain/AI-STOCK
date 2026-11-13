@@ -1,7 +1,7 @@
 {
-  "fetched_at": "2026-11-12T16:30:09",
+  "fetched_at": "2026-11-13T16:30:06",
   "cash_krw": 1153384,
-  "cash_usd": 2450.51,
+  "cash_usd": 2450.52,
   "holdings": [],
   "us_holdings": [
     {
@@ -17,18 +17,18 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "267.5000",
-      "now_pric": "296.8300",
-      "evlt_amt": "1187.3200",
-      "pl_amt": "111.6800",
-      "pl_rt": "10.43",
-      "evlt_amt_krw": "000001588812",
-      "pl_amt_krw": "000000149444",
+      "now_pric": "294.8900",
+      "evlt_amt": "1179.5600",
+      "pl_amt": "103.9400",
+      "pl_rt": "9.71",
+      "evlt_amt_krw": "000001576658",
+      "pl_amt_krw": "000000138931",
       "natn_nm": "미국",
-      "exch_rate": "1338.15",
-      "frgn_stk_book_uv_krw": "000000357955",
-      "now_pric_krw": "000000397203",
+      "exch_rate": "1336.65",
+      "frgn_stk_book_uv_krw": "000000357553",
+      "now_pric_krw": "000000394164",
       "frgn_stk_book_amt": "1070.0000",
-      "frgn_stk_book_amt_krw": "000001431820"
+      "frgn_stk_book_amt_krw": "000001430215"
     },
     {
       "stex_nm": "미국",
@@ -43,23 +43,23 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "147.9836",
-      "now_pric": "138.8000",
-      "evlt_amt": "1526.8000",
-      "pl_amt": "-108.9000",
-      "pl_rt": "-6.68",
-      "evlt_amt_krw": "000002043087",
-      "pl_amt_krw": "-00000145724",
+      "now_pric": "141.0800",
+      "evlt_amt": "1551.8800",
+      "pl_amt": "-83.8800",
+      "pl_rt": "-5.15",
+      "evlt_amt_krw": "000002074320",
+      "pl_amt_krw": "-00000112118",
       "natn_nm": "미국",
-      "exch_rate": "1338.15",
-      "frgn_stk_book_uv_krw": "000000198024",
-      "now_pric_krw": "000000185735",
+      "exch_rate": "1336.65",
+      "frgn_stk_book_uv_krw": "000000197802",
+      "now_pric_krw": "000000188574",
       "frgn_stk_book_amt": "1627.8200",
-      "frgn_stk_book_amt_krw": "000002178267"
+      "frgn_stk_book_amt_krw": "000002175825"
     }
   ],
   "raw": {
     "prsm_dpst_aset_amt": 1153384,
     "entr": 1153384,
-    "us_tot_evlt_amt": 2714.12
+    "us_tot_evlt_amt": 2731.44
   }
 }
