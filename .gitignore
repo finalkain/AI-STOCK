@@ -16,3 +16,4 @@ data/sync_trades.log
 data/bt_cache/
 data/bt_cache_scan/
 data/grade_bt_trades.csv
+data/bt_cache_leader/

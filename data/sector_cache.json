@@ -1,0 +1,174 @@
+{
+ "069510.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "053800.KQ": {
+  "sector": "Technology",
+  "industry": "Software - Infrastructure"
+ },
+ "089860.KS": {
+  "sector": "Industrials",
+  "industry": "Rental & Leasing Services"
+ },
+ "263860.KQ": {
+  "sector": "Technology",
+  "industry": "Software - Infrastructure"
+ },
+ "051160.KQ": {
+  "sector": "Technology",
+  "industry": "Information Technology Services"
+ },
+ "012750.KS": {
+  "sector": "Industrials",
+  "industry": "Security & Protection Services"
+ },
+ "150900.KQ": {
+  "sector": "Technology",
+  "industry": "Software - Infrastructure"
+ },
+ "000400.KS": {
+  "sector": "Financial Services",
+  "industry": "Insurance - Property & Casualty"
+ },
+ "251970.KQ": {
+  "sector": "Consumer Cyclical",
+  "industry": "Packaging & Containers"
+ },
+ "290550.KQ": {
+  "sector": "Technology",
+  "industry": "Electronic Components"
+ },
+ "180640.KS": {
+  "sector": "Real Estate",
+  "industry": "Real Estate Services"
+ },
+ "453340.KS": {
+  "sector": "Industrials",
+  "industry": "Specialty Business Services"
+ },
+ "032580.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "036710.KQ": {
+  "sector": "Technology",
+  "industry": "Semiconductors"
+ },
+ "089590.KS": {
+  "sector": "Industrials",
+  "industry": "Airlines"
+ },
+ "093320.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "012030.KS": {
+  "sector": "Technology",
+  "industry": "Information Technology Services"
+ },
+ "005430.KS": {
+  "sector": "Industrials",
+  "industry": "Airports & Air Services"
+ },
+ "079940.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "192820.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Household & Personal Products"
+ },
+ "004100.KS": {
+  "sector": "Consumer Cyclical",
+  "industry": "Auto Parts"
+ },
+ "003490.KS": {
+  "sector": "Industrials",
+  "industry": "Airlines"
+ },
+ "280360.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Confectioners"
+ },
+ "029460.KS": {
+  "sector": "Technology",
+  "industry": "Semiconductor Equipment & Materials"
+ },
+ "013580.KS": {
+  "sector": "Industrials",
+  "industry": "Engineering & Construction"
+ },
+ "008930.KS": {
+  "sector": "Healthcare",
+  "industry": "Medical Distribution"
+ },
+ "086450.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "093520.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "092870.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "093050.KS": {
+  "sector": "Consumer Cyclical",
+  "industry": "Apparel Manufacturing"
+ },
+ "067920.KQ": {
+  "sector": "Industrials",
+  "industry": "Security & Protection Services"
+ },
+ "170790.KQ": {
+  "sector": "Technology",
+  "industry": "Software - Infrastructure"
+ },
+ "236200.KQ": {
+  "sector": "Industrials",
+  "industry": "Security & Protection Services"
+ },
+ "068270.KS": {
+  "sector": "Healthcare",
+  "industry": "Biotechnology"
+ },
+ "271560.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Confectioners"
+ },
+ "340570.KQ": {
+  "sector": "Healthcare",
+  "industry": "Medical Devices"
+ },
+ "002900.KS": {
+  "sector": "Industrials",
+  "industry": "Farm & Heavy Construction Machinery"
+ },
+ "COST": {
+  "sector": "Consumer Defensive",
+  "industry": "Discount Stores"
+ },
+ "ABBV": {
+  "sector": "Healthcare",
+  "industry": "Drug Manufacturers - General"
+ },
+ "LLY": {
+  "sector": "Healthcare",
+  "industry": "Drug Manufacturers - General"
+ },
+ "AAPL": {
+  "sector": "Technology",
+  "industry": "Consumer Electronics"
+ },
+ "V": {
+  "sector": "Financial Services",
+  "industry": "Credit Services"
+ },
+ "JNJ": {
+  "sector": "Healthcare",
+  "industry": "Drug Manufacturers - General"
+ }
+}

@@ -43,6 +43,8 @@ import kiwoom_api
 ROOT = Path(__file__).parent
 PORTFOLIO_FILE = ROOT / "data" / "portfolio.json"
 BALANCE_CACHE_FILE = ROOT / "data" / "kiwoom_balance_cache.json"
+RADAR_FILE = ROOT / "data" / "leader_radar.json"
+SECTOR_CACHE_FILE = ROOT / "data" / "sector_cache.json"
 LOG_FILE = ROOT / "data" / "sync_trades.log"
 MAX_RANGE_DAYS = 60
 KR_RATE_SLEEP = 0.25  # kt00007 일자별 루프 rate limit
@@ -441,9 +443,28 @@ def dedup_new(journal: list[dict], fetched: list[dict]) -> tuple[list[dict], int
     return new, skipped
 
 
+def run_leader_radar() -> str | None:
+    """다음 대장주 레이더 스냅샷 갱신 (data/leader_radar.json).
+    실패해도 매매일지 동기화는 영향받지 않는다. 요약 문자열 반환, 실패 시 None."""
+    try:
+        import leader_radar
+        res = leader_radar.run_radar(progress_cb=None)
+        leader_radar.save_result(res)
+        f = res.get("funnel", {})
+        kr, us = f.get("KR", {}).get("leaders", 0), f.get("US", {}).get("leaders", 0)
+        groups = [f"{c['group']}({c['n']})" for c in res.get("clusters", [])][:5]
+        return (f"기준일 {res['as_of']} — 리더 후보 KR {kr} / US {us}, "
+                f"주도 그룹 후보 {len(res.get('clusters', []))}개"
+                + (f": {', '.join(groups)}" if groups else ""))
+    except Exception as ex:
+        print(f"⚠️  레이더 실패: {str(ex)[:200]}")
+        return None
+
+
 def git_commit_push(msg: str, push: bool = True) -> bool:
     rels = [str(p.relative_to(ROOT)) for p in
-            (PORTFOLIO_FILE, BALANCE_CACHE_FILE) if p.exists()]
+            (PORTFOLIO_FILE, BALANCE_CACHE_FILE, RADAR_FILE, SECTOR_CACHE_FILE)
+            if p.exists()]
     try:
         subprocess.run(["git", "add", *rels], cwd=ROOT, check=True,
                        capture_output=True, text=True)
@@ -488,6 +509,8 @@ def main() -> int:
     ap.add_argument("--no-push", action="store_true", help="git push 생략")
     ap.add_argument("--no-balance", action="store_true",
                     help="포지션·현금 동기화 생략 (매매일지만)")
+    ap.add_argument("--no-radar", action="store_true",
+                    help="다음 대장주 레이더 갱신 생략 (--apply 시 기본 실행, 3~6분)")
     ap.add_argument("--days", type=int, help="최근 N일")
     ap.add_argument("--start", help="YYYY-MM-DD")
     ap.add_argument("--end", help="YYYY-MM-DD")
@@ -544,17 +567,28 @@ def main() -> int:
             for c in bal_changes:
                 print(f"  {c}")
 
-    if not new and not filled and not bal_changes:
+    pf_changed = bool(new or filled or bal_changes)
+
+    # 다음 대장주 레이더 — 적용 모드에서만 (전체 유니버스 다운로드, 3~6분)
+    radar_summary = None
+    if args.apply and not args.no_radar:
+        print("\n다음 대장주 레이더 스캔 중...")
+        radar_summary = run_leader_radar()
+        if radar_summary:
+            print(f"  {radar_summary}")
+
+    if not pf_changed and not radar_summary:
         print("\n변경 없음.")
         return 0
     if not args.apply:
         print("\n(미리보기 모드 — 반영하려면 --apply)")
         return 0
 
-    save_portfolio(pf)
-    print(f"\n✅ {PORTFOLIO_FILE.name} 저장 (신규 {len(new)}건, "
-          f"pnl {filled}건, 잔고변경 {len(bal_changes)}건, "
-          f"총 일지 {len(journal)}건)")
+    if pf_changed:
+        save_portfolio(pf)
+        print(f"\n✅ {PORTFOLIO_FILE.name} 저장 (신규 {len(new)}건, "
+              f"pnl {filled}건, 잔고변경 {len(bal_changes)}건, "
+              f"총 일지 {len(journal)}건)")
     parts = []
     if new:
         parts.append(f"{len(new)} trades ({new[0]['date']}~{new[-1]['date']})")
@@ -562,6 +596,8 @@ def main() -> int:
         parts.append(f"{filled} pnl fills")
     if bal_changes:
         parts.append("balance sync")
+    if radar_summary:
+        parts.append("leader radar")
     ok = git_commit_push(f"Auto-sync {' + '.join(parts)}",
                          push=not args.no_push)
     return 0 if ok else 1
