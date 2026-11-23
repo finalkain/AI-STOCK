@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-11-23T09:50:19",
+  "fetched_at": "2026-11-23T16:30:06",
   "cash_krw": 1153384,
   "cash_usd": 2456.4,
   "holdings": [],
@@ -17,16 +17,16 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "267.5000",
-      "now_pric": "286.2000",
-      "evlt_amt": "1144.8000",
-      "pl_amt": "69.2700",
-      "pl_rt": "6.47",
-      "evlt_amt_krw": "000001541816",
-      "pl_amt_krw": "000000093292",
+      "now_pric": "286.1200",
+      "evlt_amt": "1144.4800",
+      "pl_amt": "68.9500",
+      "pl_rt": "6.44",
+      "evlt_amt_krw": "000001541385",
+      "pl_amt_krw": "000000092861",
       "natn_nm": "미국",
       "exch_rate": "1346.80",
       "frgn_stk_book_uv_krw": "000000360269",
-      "now_pric_krw": "000000385454",
+      "now_pric_krw": "000000385346",
       "frgn_stk_book_amt": "1070.0000",
       "frgn_stk_book_amt_krw": "000001441076"
     },
@@ -43,16 +43,16 @@
       "tdy_cntr_sellq": "000000000000",
       "tdy_cntr_buyq": "000000000000",
       "frgn_stk_book_uv": "147.9836",
-      "now_pric": "127.7900",
-      "evlt_amt": "1405.6900",
-      "pl_amt": "-229.7100",
-      "pl_rt": "-14.11",
-      "evlt_amt_krw": "000001893183",
-      "pl_amt_krw": "-00000309373",
+      "now_pric": "132.1500",
+      "evlt_amt": "1453.6500",
+      "pl_amt": "-181.8700",
+      "pl_rt": "-11.17",
+      "evlt_amt_krw": "000001957775",
+      "pl_amt_krw": "-00000244942",
       "natn_nm": "미국",
       "exch_rate": "1346.80",
       "frgn_stk_book_uv_krw": "000000199304",
-      "now_pric_krw": "000000172107",
+      "now_pric_krw": "000000177979",
       "frgn_stk_book_amt": "1627.8200",
       "frgn_stk_book_amt_krw": "000002192347"
     }
@@ -60,6 +60,6 @@
   "raw": {
     "prsm_dpst_aset_amt": 1153384,
     "entr": 1153384,
-    "us_tot_evlt_amt": 2550.49
+    "us_tot_evlt_amt": 2598.13
   }
 }
