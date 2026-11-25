@@ -170,5 +170,85 @@
  "JNJ": {
   "sector": "Healthcare",
   "industry": "Drug Manufacturers - General"
+ },
+ "033780.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Tobacco"
+ },
+ "AMZN": {
+  "sector": "Consumer Cyclical",
+  "industry": "Internet Retail"
+ },
+ "051630.KS": {
+  "sector": "Basic Materials",
+  "industry": "Chemicals"
+ },
+ "003780.KS": {
+  "sector": "Consumer Cyclical",
+  "industry": "Auto Parts"
+ },
+ "136540.KQ": {
+  "sector": "Technology",
+  "industry": "Information Technology Services"
+ },
+ "272450.KS": {
+  "sector": "Industrials",
+  "industry": "Airlines"
+ },
+ "282330.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Grocery Stores"
+ },
+ "241710.KQ": {
+  "sector": "Consumer Defensive",
+  "industry": "Household & Personal Products"
+ },
+ "294870.KS": {
+  "sector": "Industrials",
+  "industry": "Engineering & Construction"
+ },
+ "028050.KS": {
+  "sector": "Industrials",
+  "industry": "Engineering & Construction"
+ },
+ "173130.KQ": {
+  "sector": "Technology",
+  "industry": "Information Technology Services"
+ },
+ "092730.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "122900.KS": {
+  "sector": "Industrials",
+  "industry": "Specialty Business Services"
+ },
+ "104700.KS": {
+  "sector": "Basic Materials",
+  "industry": "Steel"
+ },
+ "030210.KS": {
+  "sector": "Financial Services",
+  "industry": "Capital Markets"
+ },
+ "161890.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Household & Personal Products"
+ },
+ "090430.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Household & Personal Products"
+ },
+ "011200.KS": {
+  "sector": "Industrials",
+  "industry": "Marine Shipping"
+ },
+ "192080.KS": {
+  "sector": "Communication Services",
+  "industry": "Electronic Gaming & Multimedia"
+ },
+ "GD": {
+  "sector": "Industrials",
+  "industry": "Aerospace & Defense"
  }
 }
