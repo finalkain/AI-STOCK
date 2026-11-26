@@ -250,5 +250,25 @@
  "GD": {
   "sector": "Industrials",
   "industry": "Aerospace & Defense"
+ },
+ "068930.KQ": {
+  "sector": "Consumer Defensive",
+  "industry": "Education & Training Services"
+ },
+ "351320.KQ": {
+  "sector": "Financial Services",
+  "industry": "Shell Companies"
+ },
+ "052460.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "003350.KS": {
+  "sector": "Consumer Defensive",
+  "industry": "Household & Personal Products"
+ },
+ "439090.KQ": {
+  "sector": "Consumer Defensive",
+  "industry": "Household & Personal Products"
  }
 }

@@ -1,7 +1,7 @@
 {
-  "total_capital": 1149826,
+  "total_capital": 1156112,
   "cash": 641214,
-  "cash_usd": 3656.4,
+  "cash_usd": 3534.61,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
@@ -10,7 +10,7 @@
       "currency": "KRW",
       "shares": 3,
       "avg_price": 170700,
-      "current_value": 509700,
+      "current_value": 516000,
       "kiwoom_stk_cd": "A005930",
       "entry_date": "",
       "trailing_stop": 0,
@@ -19,9 +19,9 @@
     {
       "asset": "SPCX",
       "currency": "USD",
-      "shares": 11,
-      "avg_price": 147.9836,
-      "current_value": 1356.85,
+      "shares": 12,
+      "avg_price": 145.7766,
+      "current_value": 1529.28,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -895,9 +895,22 @@
       "kiwoom_stk_cd": "AAPL",
       "kiwoom_fee_usd": 0.87,
       "pnl": 21.02
+    },
+    {
+      "date": "2026-11-26",
+      "action": "SELL",
+      "asset": "ABBV",
+      "currency": "USD",
+      "shares": 4,
+      "price": 300.76,
+      "reason": "키움 자동 동기화 (애브비) · 매도 $300.76 - 평단 $267.50 = +133.04$",
+      "kiwoom_deal_no": "000000001",
+      "kiwoom_stk_cd": "ABBV",
+      "kiwoom_fee_usd": 3.0,
+      "pnl": 133.04
     }
   ],
-  "total_capital_usd": 5013.25,
+  "total_capital_usd": 5063.89,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19
