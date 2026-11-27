@@ -1,27 +1,16 @@
 {
-  "total_capital": 1156112,
-  "cash": 641214,
+  "total_capital": 1177660,
+  "cash": 1177660,
   "cash_usd": 3534.61,
   "margin_value": 1130400,
   "risk_pct": 0.01,
   "positions": [
     {
-      "asset": "삼성전자",
-      "currency": "KRW",
-      "shares": 3,
-      "avg_price": 170700,
-      "current_value": 516000,
-      "kiwoom_stk_cd": "A005930",
-      "entry_date": "",
-      "trailing_stop": 0,
-      "note": "키움 자동 동기화 신규 — 손절가 설정 필요"
-    },
-    {
       "asset": "SPCX",
       "currency": "USD",
       "shares": 12,
       "avg_price": 145.7766,
-      "current_value": 1529.28,
+      "current_value": 1592.52,
       "kiwoom_stk_cd": "SPCX",
       "entry_date": "2026-07-10",
       "trailing_stop": 134.82,
@@ -910,7 +899,7 @@
       "pnl": 133.04
     }
   ],
-  "total_capital_usd": 5063.89,
+  "total_capital_usd": 5127.13,
   "last_updated": "2026-07-21T14:31:31.782439",
   "base_capital": 3085500,
   "base_capital_usd": 5113.19

@@ -270,5 +270,25 @@
  "439090.KQ": {
   "sector": "Consumer Defensive",
   "industry": "Household & Personal Products"
+ },
+ "042510.KQ": {
+  "sector": "Technology",
+  "industry": "Software - Application"
+ },
+ "340450.KQ": {
+  "sector": "Healthcare",
+  "industry": "Biotechnology"
+ },
+ "036800.KQ": {
+  "sector": "Technology",
+  "industry": "Software - Infrastructure"
+ },
+ "073490.KQ": {
+  "sector": "",
+  "industry": ""
+ },
+ "121600.KQ": {
+  "sector": "Basic Materials",
+  "industry": "Specialty Chemicals"
  }
 }
